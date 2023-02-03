@@ -7,6 +7,7 @@ from .ali_meeting import *
 from .ami import *
 from .aspire import *
 from .babel import *
+from .bookbot import *
 from .broadcast_news import *
 from .bvcc import *
 from .callhome_egyptian import *
