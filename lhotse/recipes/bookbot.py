@@ -72,7 +72,7 @@ def prepare_bookbot(
                 rows = csv.reader(f, delimiter="\t", quotechar='"')
                 text = " ".join(row[2] for row in rows)
 
-            recording = Recording.from_file(wav_file)
+            recording = Recording.from_file(wav_file, recording_id=idx)
 
             segment = SupervisionSegment(
                 id=idx,
