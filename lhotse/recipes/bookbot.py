@@ -119,7 +119,7 @@ def prepare_bookbot(
             recordings.append(recording)
             supervisions.append(segment)
 
-        recording_set = RecordingSet.from_recordings(recordings)
+        recording_set = RecordingSet.from_recordings(recordings).resample(16000)
         supervision_set = SupervisionSet.from_segments(supervisions)
         validate_recordings_and_supervisions(recording_set, supervision_set)
 
