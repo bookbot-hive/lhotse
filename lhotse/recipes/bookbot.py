@@ -9,12 +9,55 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Dict, Optional, Union
 
+import soundfile as sf
+from datasets import load_dataset
 from tqdm import tqdm
 
 from lhotse import validate_recordings_and_supervisions
 from lhotse.audio import Recording, RecordingSet
 from lhotse.supervision import SupervisionSegment, SupervisionSet
 from lhotse.utils import Pathlike
+
+
+def download_bookbot(
+    dataset_name: str,
+    target_dir: Pathlike = ".",
+) -> Path:
+    """
+    Download and unzip Bookbot dataset from HuggingFace.
+    :param dataset_name: str, HuggingFace Hub dataset name.
+    :param target_dir: Pathlike, the path of the dir to store the dataset.
+    :return: the path to downloaded and extracted directory with data.
+    """
+    target_dir = Path(target_dir)
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    dataset = load_dataset(dataset_name)
+    splits = dataset.keys()
+
+    corpus_dir = target_dir / "bookbot"
+
+    for split in splits:
+        split_dir = corpus_dir / split
+        split_dir.mkdir(parents=True, exist_ok=True)
+
+        for datum in tqdm(dataset[split]):
+            path, audio_array, sr = datum["audio"].values()
+            phonemes, language = datum["phonemes"], datum["language"]
+
+            lang_dir = split_dir / language
+            lang_dir.mkdir(parents=True, exist_ok=True)
+
+            sf.write(
+                f"{str(lang_dir)}/{path}",
+                audio_array,
+                samplerate=sr,
+                format="wav",
+            )
+            with open(f"{str(lang_dir)}/{path.replace('.wav', '.txt')}", "w") as f:
+                f.write(phonemes)
+
+    return corpus_dir
 
 
 def prepare_bookbot(

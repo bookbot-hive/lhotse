@@ -1,7 +1,7 @@
 import click
 
-from lhotse.bin.modes import prepare
-from lhotse.recipes.bookbot import prepare_bookbot
+from lhotse.bin.modes import download, prepare
+from lhotse.recipes.bookbot import download_bookbot, prepare_bookbot
 from lhotse.utils import Pathlike
 
 __all__ = ["bookbot"]
@@ -16,3 +16,11 @@ def bookbot(
 ):
     """Bookbot data preparation."""
     prepare_bookbot(corpus_dir, output_dir=output_dir)
+
+
+@download.command(context_settings=dict(show_default=True))
+@click.argument("target_dir", type=click.Path())
+@click.argument("dataset_name", type=str)
+def bookbot(dataset_name: str, target_dir: Pathlike):
+    """Bookbot download."""
+    download_bookbot(dataset_name, target_dir)
