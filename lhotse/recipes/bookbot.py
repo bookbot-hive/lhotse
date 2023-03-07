@@ -101,7 +101,7 @@ def prepare_bookbot(
                 continue
 
             with open(transcript_file, "r") as f:
-                text = f.read()
+                text = f.read().replace("ˈ", "").replace("ˌ", "")
 
             recording = Recording.from_file(wav_file, recording_id=idx)
 
