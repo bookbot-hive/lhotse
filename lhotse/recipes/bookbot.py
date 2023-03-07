@@ -3,14 +3,12 @@
 # Copyright 2021 Xiaomi Corporation (Author: Mingshuang Luo)
 # Apache 2.0
 
-import csv
 import glob
 import logging
 from collections import defaultdict
 from pathlib import Path
-from typing import Dict, List, Optional, Union
+from typing import Dict, Optional, Union
 
-import numpy as np
 from tqdm import tqdm
 
 from lhotse import validate_recordings_and_supervisions
@@ -36,31 +34,22 @@ def prepare_bookbot(
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
-    wav_files = glob.glob(str(corpus_dir) + "/**/*.wav")
-    split2speaker = get_speakers(wav_files)
-
-    splits = ["train", "test", "dev"]
+    splits = ["train", "test", "validation"]
     manifests = defaultdict(dict)
 
     for split in splits:
-        wav_files_split = list(
-            filter(
-                lambda x: x.split("/")[-1].split("_")[0] in split2speaker[split],
-                wav_files,
-            )
-        )
-
+        wav_files = glob.glob(f"{str(corpus_dir)}/{split}/**/*.wav")
         logging.debug(f"{split} dataset manifest generation.")
         recordings = []
         supervisions = []
 
-        for wav_file in tqdm(wav_files_split):
+        for wav_file in tqdm(wav_files):
             items = str(wav_file).strip().split("/")
             idx = items[-1].strip(".wav")
             speaker = idx.split("_")[0]
             language = items[-2]
 
-            transcript_file = Path(wav_file).with_suffix(".tsv")
+            transcript_file = Path(wav_file).with_suffix(".txt")
             if not Path(wav_file).is_file():
                 logging.warning(f"No such file: {wav_file}")
                 continue
@@ -69,8 +58,7 @@ def prepare_bookbot(
                 continue
 
             with open(transcript_file, "r") as f:
-                rows = csv.reader(f, delimiter="\t", quotechar='"')
-                text = " ".join(row[2] for row in rows)
+                text = f.read()
 
             recording = Recording.from_file(wav_file, recording_id=idx)
 
@@ -104,27 +92,3 @@ def prepare_bookbot(
         }
 
     return manifests
-
-
-def get_speakers(wav_files: List[str]) -> Dict[str, List[str]]:
-    speakers = [path.split("/")[-1].split("_")[0] for path in wav_files]
-    speaker2count = {s: c for s, c in zip(*np.unique(speakers, return_counts=True))}
-
-    train_num = int(0.7 * len(wav_files))
-    dev_num = int(0.9 * len(wav_files))
-
-    train_speakers, test_speakers, dev_speakers = [], [], []
-    total = 0
-
-    for speaker, count in sorted(
-        speaker2count.items(), key=lambda item: item[1], reverse=True
-    ):
-        if total < train_num and total < dev_num:
-            train_speakers.append(speaker)
-        elif total < dev_num:
-            test_speakers.append(speaker)
-        else:
-            dev_speakers.append(speaker)
-        total += count
-
-    return {"train": train_speakers, "test": test_speakers, "dev": dev_speakers}
