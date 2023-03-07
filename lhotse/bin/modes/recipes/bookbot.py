@@ -19,8 +19,8 @@ def bookbot(
 
 
 @download.command(context_settings=dict(show_default=True))
-@click.argument("target_dir", type=click.Path())
 @click.argument("dataset_name", type=str)
+@click.argument("target_dir", type=click.Path())
 def bookbot(dataset_name: str, target_dir: Pathlike):
     """Bookbot download."""
     download_bookbot(dataset_name, target_dir)
