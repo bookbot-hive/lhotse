@@ -22,11 +22,13 @@ from lhotse.utils import Pathlike
 def download_bookbot(
     dataset_name: str,
     target_dir: Pathlike = ".",
+    use_phonemes: bool = False,
 ) -> Path:
     """
     Download and unzip Bookbot dataset from HuggingFace.
     :param dataset_name: str, HuggingFace Hub dataset name.
     :param target_dir: Pathlike, the path of the dir to store the dataset.
+    :param use_phonemes: bool, whether or not to use phonemes.
     :return: the path to downloaded and extracted directory with data.
     """
     target_dir = Path(target_dir)
@@ -43,7 +45,8 @@ def download_bookbot(
 
         for datum in tqdm(dataset[split]):
             path, audio_array, sr = datum["audio"].values()
-            phonemes, language = datum["phonemes"], datum["language"]
+            text = datum["phonemes"] if use_phonemes else datum["text"]
+            language = datum["language"]
 
             lang_dir = split_dir / language
             lang_dir.mkdir(parents=True, exist_ok=True)
@@ -55,7 +58,7 @@ def download_bookbot(
                 format="wav",
             )
             with open(f"{str(lang_dir)}/{path.replace('.wav', '.txt')}", "w") as f:
-                f.write(phonemes)
+                f.write(text)
 
     return corpus_dir
 

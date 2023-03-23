@@ -21,6 +21,12 @@ def bookbot(
 @download.command(context_settings=dict(show_default=True))
 @click.argument("dataset_name", type=str)
 @click.argument("target_dir", type=click.Path())
-def bookbot(dataset_name: str, target_dir: Pathlike):
+@click.option(
+    "--use-phonemes",
+    type=bool,
+    default=False,
+    help="Whether to use phonemes as labels",
+)
+def bookbot(dataset_name: str, target_dir: Pathlike, use_phonemes: bool):
     """Bookbot download."""
-    download_bookbot(dataset_name, target_dir)
+    download_bookbot(dataset_name, target_dir, use_phonemes)
