@@ -18,6 +18,7 @@ from .cmu_arctic import *
 from .cmu_indic import *
 from .cmu_kids import *
 from .commonvoice import *
+from .commonvoice_phonemes import *
 from .csj import *
 from .cslu_kids import *
 from .daily_talk import *
