@@ -54,9 +54,9 @@ def download_commonvoice_phonemes(
                 f"{str(lang_dir)}/{path}",
                 audio_array,
                 samplerate=sr,
-                format="mp3",
+                format="wav",
             )
-            with open(f"{str(lang_dir)}/{path.replace('.mp3', '.txt')}", "w") as f:
+            with open(f"{str(lang_dir)}/{path.replace('.wav', '.txt')}", "w") as f:
                 f.write(text)
 
     return corpus_dir
@@ -82,19 +82,19 @@ def prepare_commonvoice_phonemes(
     manifests = defaultdict(dict)
 
     for split in splits:
-        mp3_files = glob.glob(f"{str(corpus_dir)}/{split}/**/*.mp3")
+        wav_files = glob.glob(f"{str(corpus_dir)}/{split}/**/*.wav")
         logging.debug(f"{split} dataset manifest generation.")
         recordings = []
         supervisions = []
 
-        for mp3_file in tqdm(mp3_files):
-            items = str(mp3_file).strip().split("/")
-            idx = items[-1].strip(".mp3")
+        for wav_file in tqdm(wav_files):
+            items = str(wav_file).strip().split("/")
+            idx = items[-1].strip(".wav")
             language = items[-2]
 
-            transcript_file = Path(mp3_file).with_suffix(".txt")
-            if not Path(mp3_file).is_file():
-                logging.warning(f"No such file: {mp3_file}")
+            transcript_file = Path(wav_file).with_suffix(".txt")
+            if not Path(wav_file).is_file():
+                logging.warning(f"No such file: {wav_file}")
                 continue
             if not Path(transcript_file).is_file():
                 logging.warning(f"No transcript: {transcript_file}")
@@ -103,7 +103,7 @@ def prepare_commonvoice_phonemes(
             with open(transcript_file, "r") as f:
                 text = f.read().replace("ˈ", "").replace("ˌ", "")
 
-            recording = Recording.from_file(mp3_file, recording_id=idx)
+            recording = Recording.from_file(wav_file, recording_id=idx)
 
             segment = SupervisionSegment(
                 id=idx,
