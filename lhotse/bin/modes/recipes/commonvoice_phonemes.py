@@ -4,7 +4,7 @@ from lhotse.bin.modes import download, prepare
 from lhotse.recipes.commonvoice_phonemes import download_commonvoice_phonemes, prepare_commonvoice_phonemes
 from lhotse.utils import Pathlike
 
-__all__ = ["commonvoice"]
+__all__ = ["commonvoice_phonemes"]
 
 
 @prepare.command(context_settings=dict(show_default=True))
