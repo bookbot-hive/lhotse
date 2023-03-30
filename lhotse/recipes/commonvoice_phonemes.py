@@ -12,6 +12,7 @@ from typing import Dict, Optional, Union
 import soundfile as sf
 from datasets import load_dataset
 from tqdm import tqdm
+from p_tqdm import p_map
 
 from lhotse import validate_recordings_and_supervisions
 from lhotse.audio import Recording, RecordingSet
@@ -30,6 +31,23 @@ def download_commonvoice_phonemes(
     :param use_phonemes: bool, whether or not to use phonemes.
     :return: the path to downloaded and extracted directory with data.
     """
+    def save_audio_file(datum):
+        path, audio_array, sr = datum["audio"].values()
+        text = datum["phonemes"] if use_phonemes else datum["sentence"]
+        language = datum["locale"]
+
+        lang_dir = split_dir / language
+        lang_dir.mkdir(parents=True, exist_ok=True)
+
+        sf.write(
+            f"{str(lang_dir)}/{path}",
+            audio_array,
+            samplerate=sr,
+            format="wav",
+        )
+        with open(f"{str(lang_dir)}/{path.replace('.wav', '.txt')}", "w") as f:
+            f.write(text)
+
     target_dir = Path(target_dir)
     target_dir.mkdir(parents=True, exist_ok=True)
 
@@ -42,22 +60,7 @@ def download_commonvoice_phonemes(
         split_dir = corpus_dir / split
         split_dir.mkdir(parents=True, exist_ok=True)
 
-        for datum in tqdm(dataset[split]):
-            path, audio_array, sr = datum["audio"].values()
-            text = datum["phonemes"] if use_phonemes else datum["sentence"]
-            language = datum["locale"]
-
-            lang_dir = split_dir / language
-            lang_dir.mkdir(parents=True, exist_ok=True)
-
-            sf.write(
-                f"{str(lang_dir)}/{path}",
-                audio_array,
-                samplerate=sr,
-                format="wav",
-            )
-            with open(f"{str(lang_dir)}/{path.replace('.wav', '.txt')}", "w") as f:
-                f.write(text)
+        p_map(save_audio_file, dataset[split])
 
     return corpus_dir
 
