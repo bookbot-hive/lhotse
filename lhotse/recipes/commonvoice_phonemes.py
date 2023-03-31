@@ -33,6 +33,7 @@ def download_commonvoice_phonemes(
     """
     def save_audio_file(datum):
         path, audio_array, sr = datum["audio"].values()
+        path = path.replace(".mp3", ".wav")
         text = datum["phonemes"] if use_phonemes else datum["sentence"]
         language = datum["locale"]
 
