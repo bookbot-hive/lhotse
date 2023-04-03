@@ -7,6 +7,7 @@ from .aishell4 import *
 from .ali_meeting import *
 from .ami import *
 from .aspire import *
+from .austalk_words_mq import *
 from .babel import *
 from .bookbot import *
 from .broadcast_news import *
@@ -51,6 +52,7 @@ from .nsc import *
 from .peoples_speech import *
 from .primewords import *
 from .rir_noise import *
+from .sc_cw_children import *
 from .speechcommands import *
 from .spgispeech import *
 from .stcmds import *
@@ -60,6 +62,7 @@ from .tal_csasr import *
 from .tedlium import *
 from .thchs_30 import *
 from .timit import *
+from .timit_asr_gruut import *
 from .vctk import *
 from .voxceleb import *
 from .wenet_speech import *

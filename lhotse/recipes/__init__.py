@@ -5,6 +5,7 @@ from .aishell4 import download_aishell4, prepare_aishell4
 from .ali_meeting import download_ali_meeting, prepare_ali_meeting
 from .ami import download_ami, prepare_ami
 from .aspire import prepare_aspire
+from .austalk_words_mq import download_austalk_words_mq, prepare_austalk_words_mq
 from .babel import prepare_single_babel_language
 from .bookbot import prepare_bookbot
 from .broadcast_news import prepare_broadcast_news
@@ -47,12 +48,14 @@ from .musan import download_musan, prepare_musan
 from .nsc import prepare_nsc
 from .peoples_speech import prepare_peoples_speech
 from .rir_noise import download_rir_noise, prepare_rir_noise
+from .sc_cw_children import download_sc_cw_children, prepare_sc_cw_children
 from .speechcommands import download_speechcommands, prepare_speechcommands
 from .spgispeech import download_spgispeech, prepare_spgispeech
 from .stcmds import download_stcmds, prepare_stcmds
 from .switchboard import prepare_switchboard
 from .tedlium import download_tedlium, prepare_tedlium
 from .thchs_30 import download_thchs_30, prepare_thchs_30
+from .timit_asr_gruut import download_timit_asr_gruut, prepare_timit_asr_gruut
 from .timit import download_timit, prepare_timit
 from .vctk import download_vctk, prepare_vctk
 from .voxceleb import download_voxceleb1, download_voxceleb2, prepare_voxceleb

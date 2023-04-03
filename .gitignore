@@ -2,7 +2,7 @@
 deps/
 examples/data
 examples/tmp
-
+tmp
 # IDEs / editors
 .idea/
 .vscode/
