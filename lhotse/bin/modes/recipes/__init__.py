@@ -10,6 +10,7 @@ from .aspire import *
 from .austalk_words_mq import *
 from .babel import *
 from .bookbot import *
+from .bookbot_huggingface import *
 from .broadcast_news import *
 from .bvcc import *
 from .callhome_egyptian import *

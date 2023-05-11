@@ -8,6 +8,7 @@ from .aspire import prepare_aspire
 from .austalk_words_mq import download_austalk_words_mq, prepare_austalk_words_mq
 from .babel import prepare_single_babel_language
 from .bookbot import prepare_bookbot
+from .bookbot_huggingface import prepare_bookbot_huggingface
 from .broadcast_news import prepare_broadcast_news
 from .bvcc import download_bvcc, prepare_bvcc
 from .callhome_egyptian import prepare_callhome_egyptian
@@ -17,7 +18,10 @@ from .cmu_arctic import download_cmu_arctic, prepare_cmu_arctic
 from .cmu_indic import download_cmu_indic, prepare_cmu_indic
 from .cmu_kids import prepare_cmu_kids
 from .commonvoice import prepare_commonvoice
-from .commonvoice_phonemes import prepare_commonvoice_phonemes, download_commonvoice_phonemes
+from .commonvoice_phonemes import (
+    prepare_commonvoice_phonemes,
+    download_commonvoice_phonemes,
+)
 from .csj import prepare_csj
 from .cslu_kids import prepare_cslu_kids
 from .daily_talk import download_daily_talk, prepare_daily_talk
