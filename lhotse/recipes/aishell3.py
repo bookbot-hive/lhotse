@@ -1,13 +1,13 @@
 """
-AISHELL-3 is a large-scale and high-fidelity multi-speaker Mandarin speech corpus 
-published by Beijing Shell Shell Technology Co.,Ltd. 
+AISHELL-3 is a large-scale and high-fidelity multi-speaker Mandarin speech corpus
+published by Beijing Shell Shell Technology Co.,Ltd.
 It can be used to train multi-speaker Text-to-Speech (TTS) systems.
-The corpus contains roughly 85 hours of emotion-neutral recordings spoken by 
-218 native Chinese mandarin speakers and total 88035 utterances. 
-Their auxiliary attributes such as gender, age group and native accents are 
-explicitly marked and provided in the corpus. Accordingly, transcripts in Chinese 
-character-level and pinyin-level are provided along with the recordings. 
-The word & tone transcription accuracy rate is above 98%, through professional 
+The corpus contains roughly 85 hours of emotion-neutral recordings spoken by
+218 native Chinese mandarin speakers and total 88035 utterances.
+Their auxiliary attributes such as gender, age group and native accents are
+explicitly marked and provided in the corpus. Accordingly, transcripts in Chinese
+character-level and pinyin-level are provided along with the recordings.
+The word & tone transcription accuracy rate is above 98%, through professional
 speech annotation and strict quality inspection for tone and prosody.
 """
 import logging
@@ -26,7 +26,7 @@ from lhotse import (
 )
 from lhotse.audio import Recording, RecordingSet
 from lhotse.recipes.utils import manifests_exist, read_manifests_if_cached
-from lhotse.utils import Pathlike, safe_extract, urlretrieve_progress
+from lhotse.utils import Pathlike, resumable_download, safe_extract
 
 aishell3 = (
     "test",
@@ -56,11 +56,10 @@ def download_aishell3(
     completed_detector = target_dir / ".completed"
     if completed_detector.is_file():
         logging.info(f"Skipping {tar_name} because {completed_detector} exists.")
-        return
-    if force_download or not tar_path.is_file():
-        urlretrieve_progress(
-            f"{url}/{tar_name}", filename=tar_path, desc=f"Downloading {tar_name}"
-        )
+        return target_dir
+    resumable_download(
+        f"{url}/{tar_name}", filename=tar_path, force_download=force_download
+    )
     with tarfile.open(tar_path) as tar:
         safe_extract(tar, path=target_dir)
     completed_detector.touch()
@@ -93,6 +92,30 @@ def prepare_aishell3(
             dataset_parts=dataset_parts, output_dir=output_dir, prefix="aishell3"
         )
 
+    speaker_info = {}
+    speaker_info_path = corpus_dir / "spk-info.txt"
+    assert speaker_info_path.is_file(), f"No such file: {speaker_info_path}"
+    with open(speaker_info_path, "r") as f:
+        for k in f.readlines():
+            k = k.strip()
+            if k.startswith("#") or len(k) == 0:
+                continue
+            k = k.split("\t")
+            speaker, gender = k[0], k[2]
+            speaker_info[speaker] = gender
+
+    label_path = corpus_dir / "train" / "label_train-set.txt"
+    assert label_path.is_file(), f"No such file: {label_path}"
+    with open(label_path, "r") as f:
+        tone_labels = {}
+        for k in f.readlines():
+            k = k.strip()
+            if k.startswith("#") or len(k) == 0:
+                continue
+            k = k.split("|")
+            assert len(k) == 3
+            tone_labels[k[0]] = k[1:]
+
     for part in tqdm(dataset_parts, desc="Preparing aishell3 parts"):
         if manifests_exist(part=part, output_dir=output_dir, prefix="aishell3"):
             logging.info(f"aishell3 subset: {part} already prepared - skipping.")
@@ -107,6 +130,8 @@ def prepare_aishell3(
                 id, text = line.strip().split("\t")
                 audio_path = part_path / "wav" / id[:7] / id
                 id = id.split(".")[0]
+                tones = tone_labels.get(id, (None, None))
+                speaker = id[:7]
                 text = "".join([x for i, x in enumerate(text.split()) if i % 2 == 0])
                 pinyin = " ".join([x for i, x in enumerate(text.split()) if i % 2 == 1])
                 if not audio_path.is_file():
@@ -120,9 +145,14 @@ def prepare_aishell3(
                     duration=recording.duration,
                     channel=0,
                     language="Chinese",
-                    gender="female",
+                    speaker=speaker,
+                    gender=speaker_info.get(speaker, "female"),
                     text=text,
-                    custom={"pinyin": pinyin.strip()},
+                    custom={
+                        "pinyin": pinyin.strip(),
+                        "tones_pinyin": tones[0],
+                        "tones_text": tones[1],
+                    },
                 )
                 recordings.append(recording)
                 supervisions.append(segment)

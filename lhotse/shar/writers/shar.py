@@ -71,13 +71,20 @@ class SharWriter:
         shard_size: Optional[int] = 1000,
         warn_unused_fields: bool = True,
         include_cuts: bool = True,
+        shard_suffix: Optional[str] = None,
     ) -> None:
         self.output_dir = str(output_dir)
         self.shard_size = shard_size
         self.fields = fields
         self.warn_unused_fields = warn_unused_fields
         self.include_cuts = include_cuts
-        self.shard_suffix = ".%06d" if self.sharding_enabled else ""
+        if self.sharding_enabled:
+            assert (
+                shard_suffix is None
+            ), f"shard_suffix must be None when shard_size is specified (got: '{shard_suffix}')."
+            self.shard_suffix = ".%06d"
+        else:
+            self.shard_suffix = ifnone(shard_suffix, "")
 
         self.writers = {}
         if include_cuts:
@@ -118,7 +125,7 @@ class SharWriter:
         if "recording" in self.fields:
             if cut.has_recording:
                 data = cut.load_audio()
-                recording = to_shar_placeholder(cut.recording)
+                recording = to_shar_placeholder(cut.recording, cut)
                 self.writers["recording"].write(
                     cut.id, data, cut.sampling_rate, manifest=recording
                 )
@@ -134,7 +141,7 @@ class SharWriter:
         if "features" in self.fields:
             if cut.has_features:
                 data = cut.load_features()
-                features = to_shar_placeholder(cut.features)
+                features = to_shar_placeholder(cut.features, cut)
                 self.writers["features"].write(cut.id, data, manifest=features)
                 cut = fastcopy(cut, features=features)
             else:
@@ -161,7 +168,7 @@ class SharWriter:
                     self.writers[key].write({"cut_id": cut.id, key: val})
                 else:
                     data = cut.load_custom(key)
-                    placeholder_obj = to_shar_placeholder(val)
+                    placeholder_obj = to_shar_placeholder(val, cut)
                     kwargs = {}
                     if isinstance(val, Recording):
                         kwargs["sampling_rate"] = val.sampling_rate
@@ -183,6 +190,10 @@ class SharWriter:
                         f"Found cut with '{key}' field that is not specified for Shar writing."
                     )
                 continue
+
+        # We will write only the relevant subset of the binary data alongside cut,
+        # so we need to update the offset (start).
+        cut = fastcopy(cut, start=0)
 
         if "cuts" in self.writers:
             self.writers["cuts"].write(cut)

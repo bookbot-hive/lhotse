@@ -4,7 +4,7 @@ import pickle
 import random
 import warnings
 from collections import Counter, defaultdict
-from concurrent.futures import Executor, ProcessPoolExecutor
+from concurrent.futures import Executor, ProcessPoolExecutor, as_completed
 from functools import partial, reduce
 from itertools import chain, islice
 from math import ceil
@@ -393,7 +393,7 @@ class CutSet(Serializable, AlgorithmMixin):
         one or more binary tarfiles.
         Each tarfile contains a single type of data, e.g., recordings, features, or custom fields.
 
-        Given an example directory named ``some_dir`, its expected layout is
+        Given an example directory named ``some_dir``, its expected layout is
         ``some_dir/cuts.000000.jsonl.gz``, ``some_dir/recording.000000.tar``,
         ``some_dir/features.000000.tar``, and then the same names but numbered with ``000001``, etc.
         There may also be other files if the cuts have custom data attached to them.
@@ -415,37 +415,58 @@ class CutSet(Serializable, AlgorithmMixin):
         We can simply load a directory created by :class:`~lhotse.shar.writers.shar.SharWriter`.
         Example::
 
-        >>> cuts = LazySharIterator(in_dir="some_dir")
-        ... for cut in cuts:
-        ...     print("Cut", cut.id, "has duration of", cut.duration)
-        ...     audio = cut.load_audio()
-        ...     fbank = cut.load_features()
+            >>> cuts = LazySharIterator(in_dir="some_dir")
+            ... for cut in cuts:
+            ...     print("Cut", cut.id, "has duration of", cut.duration)
+            ...     audio = cut.load_audio()
+            ...     fbank = cut.load_features()
 
         :class:`.LazySharIterator` can also be initialized from a dict, where the keys
         indicate fields to be read, and the values point to actual shard locations.
         This is useful when only a subset of data is needed, or it is stored in different
         locations. Example::
 
-        >>> cuts = LazySharIterator({
-        ...     "cuts": ["some_dir/cuts.000000.jsonl.gz"],
-        ...     "recording": ["another_dir/recording.000000.tar"],
-        ...     "features": ["yet_another_dir/features.000000.tar"],
-        ... })
-        ... for cut in cuts:
-        ...     print("Cut", cut.id, "has duration of", cut.duration)
-        ...     audio = cut.load_audio()
-        ...     fbank = cut.load_features()
+            >>> cuts = LazySharIterator({
+            ...     "cuts": ["some_dir/cuts.000000.jsonl.gz"],
+            ...     "recording": ["another_dir/recording.000000.tar"],
+            ...     "features": ["yet_another_dir/features.000000.tar"],
+            ... })
+            ... for cut in cuts:
+            ...     print("Cut", cut.id, "has duration of", cut.duration)
+            ...     audio = cut.load_audio()
+            ...     fbank = cut.load_features()
 
         We also support providing shell commands as shard sources, inspired by WebDataset.
+        The "cuts" field expects a .jsonl stream, while the other fields expect a .tar stream.
         Example::
 
-        >>> cuts = LazySharIterator({
-        ...     "cuts": ["pipe:curl https://my.page/cuts.000000.jsonl.gz"],
-        ...     "recording": ["pipe:curl https://my.page/recording.000000.tar"],
-        ... })
-        ... for cut in cuts:
-        ...     print("Cut", cut.id, "has duration of", cut.duration)
-        ...     audio = cut.load_audio()
+            >>> cuts = LazySharIterator({
+            ...     "cuts": ["pipe:curl https://my.page/cuts.000000.jsonl"]
+            ...     "recording": ["pipe:curl https://my.page/recording.000000.tar"],
+            ... })
+            ... for cut in cuts:
+            ...     print("Cut", cut.id, "has duration of", cut.duration)
+            ...     audio = cut.load_audio()
+
+        The shell command can also contain pipes, which can be used to e.g. decompressing.
+        Example::
+
+            >>> cuts = LazySharIterator({
+            ...     "cuts": ["pipe:curl https://my.page/cuts.000000.jsonl.gz | gunzip -c -"],
+                    (...)
+            ... })
+
+        Finally, we allow specifying URLs or cloud storage URIs for the shard sources.
+        We defer to ``smart_open`` library to handle those.
+        Example::
+
+            >>> cuts = LazySharIterator({
+            ...     "cuts": ["s3://my-bucket/cuts.000000.jsonl.gz"],
+            ...     "recording": ["s3://my-bucket/recording.000000.tar"],
+            ... })
+            ... for cut in cuts:
+            ...     print("Cut", cut.id, "has duration of", cut.duration)
+            ...     audio = cut.load_audio()
 
         :param fields: a dict whose keys specify which fields to load,
             and values are lists of shards (either paths or shell commands).
@@ -501,6 +522,8 @@ class CutSet(Serializable, AlgorithmMixin):
         shard_size: Optional[int] = 1000,
         warn_unused_fields: bool = True,
         include_cuts: bool = True,
+        num_jobs: int = 1,
+        verbose: bool = False,
     ) -> Dict[str, List[str]]:
         """
         Writes cuts and their corresponding data into multiple shards,
@@ -543,22 +566,59 @@ class CutSet(Serializable, AlgorithmMixin):
         Turning it off is useful when extending existing dataset with new fields/feature types,
         but the original cuts do not require any modification.
 
+        When ``num_jobs`` is greater than 1, we will first split the CutSet into shard CutSets,
+        and then export the ``fields`` in parallel using multiple subprocesses. Enabling ``verbose``
+        will display a progress bar.
+
+        .. note:: It is recommended not to set ``num_jobs`` too high on systems with slow disks,
+            as the export will likely be bottlenecked by I/O speed in these cases.
+            Try experimenting with 4-8 jobs first.
+
         See also: :class:`~lhotse.shar.writers.shar.SharWriter`,
             :meth:`~lhotse.cut.set.CutSet.to_shar`.
         """
-        from lhotse.shar import SharWriter
+        assert num_jobs > 0 and isinstance(
+            num_jobs, int
+        ), f"The number of jobs must be an integer greater than 0 (got {num_jobs})."
 
-        with SharWriter(
-            output_dir=output_dir,
-            fields=fields,
-            shard_size=shard_size,
-            warn_unused_fields=warn_unused_fields,
-            include_cuts=include_cuts,
-        ) as writer:
-            for cut in self:
-                writer.write(cut)
+        if num_jobs == 1:
+            return _export_to_shar_single(
+                cuts=self,
+                output_dir=output_dir,
+                shard_size=shard_size,
+                fields=fields,
+                warn_unused_fields=warn_unused_fields,
+                include_cuts=include_cuts,
+                shard_suffix=None,
+            )
 
-        return writer.output_paths
+        progbar = partial(tqdm, desc="Shard progress") if verbose else lambda x: x
+        shards = self.split_lazy(
+            output_dir=output_dir, chunk_size=shard_size, prefix="cuts", num_digits=6
+        )
+        with ProcessPoolExecutor(num_jobs) as ex:
+            futures = []
+            output_paths = defaultdict(list)
+            for idx, shard in enumerate(shards):
+                futures.append(
+                    ex.submit(
+                        _export_to_shar_single,
+                        cuts=shard,
+                        output_dir=output_dir,
+                        shard_size=None,  # already sharded
+                        fields=fields,
+                        warn_unused_fields=warn_unused_fields,
+                        include_cuts=True,
+                        shard_suffix=f".{idx:06d}",
+                    )
+                )
+            for f in progbar(as_completed(futures)):
+                partial_paths = f.result()
+                for k, v in partial_paths.items():
+                    output_paths[k].append(v)
+        for k in output_paths:
+            output_paths[k] = sorted(output_paths[k])
+        return output_paths
 
     def to_dicts(self) -> Iterable[dict]:
         return (cut.to_dict() for cut in self)
@@ -908,7 +968,11 @@ class CutSet(Serializable, AlgorithmMixin):
         ]
 
     def split_lazy(
-        self, output_dir: Pathlike, chunk_size: int, prefix: str = ""
+        self,
+        output_dir: Pathlike,
+        chunk_size: int,
+        prefix: str = "",
+        num_digits: int = 8,
     ) -> List["CutSet"]:
         """
         Splits a manifest (either lazily or eagerly opened) into chunks, each
@@ -925,10 +989,15 @@ class CutSet(Serializable, AlgorithmMixin):
             Each manifest is saved at: ``{output_dir}/{prefix}.{split_idx}.jsonl.gz``
         :param chunk_size: the number of items in each chunk.
         :param prefix: the prefix of each manifest.
+        :param num_digits: the width of ``split_idx``, which will be left padded with zeros to achieve it.
         :return: a list of lazily opened chunk manifests.
         """
         return split_manifest_lazy(
-            self, output_dir=output_dir, chunk_size=chunk_size, prefix=prefix
+            self,
+            output_dir=output_dir,
+            chunk_size=chunk_size,
+            prefix=prefix,
+            num_digits=num_digits,
         )
 
     def subset(
@@ -975,8 +1044,8 @@ class CutSet(Serializable, AlgorithmMixin):
                     f"CutSet has only {len(self)} items but last {last} required; not doing anything."
                 )
                 return self
-            cut_ids = list(self.ids)[-last:]
-            return CutSet.from_cuts(self[cid] for cid in cut_ids)
+            N = len(self)
+            return CutSet.from_cuts(islice(self, N - last, N))
 
         if supervision_ids is not None:
             # Remove cuts without supervisions
@@ -1632,6 +1701,30 @@ class CutSet(Serializable, AlgorithmMixin):
             lambda cut: cut.perturb_volume(factor=factor, affix_id=affix_id)
         )
 
+    def normalize_loudness(self, target: float, affix_id: bool = True) -> "CutSet":
+        """
+        Return a new :class:`~lhotse.cut.CutSet` that will lazily apply loudness normalization
+        to the desired ``target`` loudness (in dBFS).
+
+        :param target: The target loudness in dBFS.
+        :param affix_id: When true, we will modify the ``Cut.id`` field
+            by affixing it with "_ln{target}".
+        :return: a modified copy of the current ``CutSet``.
+        """
+        return self.map(
+            lambda cut: cut.normalize_loudness(target=target, affix_id=affix_id)
+        )
+
+    def dereverb_wpe(self, affix_id: bool = True) -> "CutSet":
+        """
+        Return a new :class:`~lhotse.cut.CutSet` that will lazily apply WPE dereverberation.
+
+        :param affix_id: When true, we will modify the ``Cut.id`` field
+            by affixing it with "_wpe".
+        :return: a modified copy of the current ``CutSet``.
+        """
+        return self.map(lambda cut: cut.dereverb_wpe(affix_id=affix_id))
+
     def reverb_rir(
         self,
         rir_recordings: Optional["RecordingSet"] = None,
@@ -1784,6 +1877,12 @@ class CutSet(Serializable, AlgorithmMixin):
         Return a new :class:`.CutSet`, where each :class:`.Cut` is copied and detached from its supervisions.
         """
         return self.map(lambda cut: cut.drop_supervisions())
+
+    def drop_alignments(self) -> "CutSet":
+        """
+        Return a new :class:`.CutSet`, where each :class:`.Cut` is copied and detached from the alignments present in its supervisions.
+        """
+        return self.map(lambda cut: cut.drop_alignments())
 
     def compute_and_store_features(
         self,
@@ -2563,10 +2662,14 @@ def mix(
     if offset > reference_cut.duration:
         reference_cut = reference_cut.pad(duration=offset)
 
-    # When the left_cut is a MixedCut, take its existing tracks, otherwise create a new track.
-    if isinstance(reference_cut, MixedCut):
+    # When the left_cut is a MixedCut and it does not have existing transforms,
+    # take its existing tracks, otherwise create a new track.
+    if (
+        isinstance(reference_cut, MixedCut)
+        and len(ifnone(reference_cut.transforms, [])) == 0
+    ):
         old_tracks = reference_cut.tracks
-    elif isinstance(reference_cut, (DataCut, PaddingCut)):
+    elif isinstance(reference_cut, (DataCut, PaddingCut, MixedCut)):
         old_tracks = [MixTrack(cut=reference_cut)]
     else:
         raise ValueError(f"Unsupported type of cut in mix(): {type(reference_cut)}")
@@ -2574,27 +2677,32 @@ def mix(
     # When the right_cut is a MixedCut, adapt its existing tracks with the new offset and snr,
     # otherwise create a new track.
     if isinstance(mixed_in_cut, MixedCut):
-        new_tracks = [
-            MixTrack(
-                cut=track.cut,
-                offset=round(track.offset + offset, ndigits=8),
-                snr=(
-                    # When no new SNR is specified, retain whatever was there in the first place.
-                    track.snr
-                    if snr is None
-                    # When new SNR is specified but none was specified before, assign the new SNR value.
-                    else snr
-                    if track.snr is None
-                    # When both new and previous SNR were specified, assign their sum,
-                    # as the SNR for each track is defined with regard to the first track energy.
-                    else track.snr + snr
-                    if snr is not None and track is not None
-                    # When no SNR was specified whatsoever, use none.
-                    else None
-                ),
-            )
-            for track in mixed_in_cut.tracks
-        ]
+        # Similarly for mixed_in_cut, if it is a MixedCut and it does not have existing transforms,
+        # take its existing tracks, otherwise create a new track.
+        if len(ifnone(mixed_in_cut.transforms, [])) > 0:
+            new_tracks = [MixTrack(cut=mixed_in_cut, offset=offset, snr=snr)]
+        else:
+            new_tracks = [
+                MixTrack(
+                    cut=track.cut,
+                    offset=round(track.offset + offset, ndigits=8),
+                    snr=(
+                        # When no new SNR is specified, retain whatever was there in the first place.
+                        track.snr
+                        if snr is None
+                        # When new SNR is specified but none was specified before, assign the new SNR value.
+                        else snr
+                        if track.snr is None
+                        # When both new and previous SNR were specified, assign their sum,
+                        # as the SNR for each track is defined with regard to the first track energy.
+                        else track.snr + snr
+                        if snr is not None and track is not None
+                        # When no SNR was specified whatsoever, use none.
+                        else None
+                    ),
+                )
+                for track in mixed_in_cut.tracks
+            ]
     elif isinstance(mixed_in_cut, (DataCut, PaddingCut)):
         new_tracks = [MixTrack(cut=mixed_in_cut, offset=offset, snr=snr)]
     else:
@@ -3268,3 +3376,28 @@ def _add_features_path_prefix_single(cut, path):
 
 def _call(obj, member_fn: str, *args, **kwargs) -> Callable:
     return getattr(obj, member_fn)(*args, **kwargs)
+
+
+def _export_to_shar_single(
+    cuts: CutSet,
+    output_dir: Pathlike,
+    shard_size: Optional[int],
+    fields: Dict[str, str],
+    warn_unused_fields: bool,
+    include_cuts: bool,
+    shard_suffix: Optional[str],
+) -> Dict[str, List[str]]:
+    from lhotse.shar import SharWriter
+
+    with SharWriter(
+        output_dir=output_dir,
+        fields=fields,
+        shard_size=shard_size,
+        warn_unused_fields=warn_unused_fields,
+        include_cuts=include_cuts,
+        shard_suffix=shard_suffix,
+    ) as writer:
+        for cut in cuts:
+            writer.write(cut)
+
+    return writer.output_paths

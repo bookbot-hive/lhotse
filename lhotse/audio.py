@@ -35,6 +35,8 @@ from tqdm.auto import tqdm
 
 from lhotse.augmentation import (
     AudioTransform,
+    DereverbWPE,
+    LoudnessNormalization,
     Resample,
     ReverbWithImpulseResponse,
     Speed,
@@ -71,6 +73,7 @@ _DEFAULT_LHOTSE_AUDIO_DURATION_MISMATCH_TOLERANCE: Seconds = 0.025
 LHOTSE_AUDIO_DURATION_MISMATCH_TOLERANCE: Seconds = (
     _DEFAULT_LHOTSE_AUDIO_DURATION_MISMATCH_TOLERANCE
 )
+FFMPEG_TORCHAUDIO_INFO_ENABLED: bool = True
 
 
 def set_audio_duration_mismatch_tolerance(delta: Seconds) -> None:
@@ -112,6 +115,32 @@ def set_audio_duration_mismatch_tolerance(delta: Seconds) -> None:
             f"We don't recommend this as it might break some data augmentation transforms."
         )
     LHOTSE_AUDIO_DURATION_MISMATCH_TOLERANCE = delta
+
+
+def set_ffmpeg_torchaudio_info_enabled(enabled: bool) -> None:
+    """
+    Override Lhotse's global setting for whether to use ffmpeg-torchaudio to
+    compute the duration of audio files. If disabled, we fall back to using a different
+    backend such as sox_io or soundfile.
+
+    .. note:: See this issue for more details: https://github.com/lhotse-speech/lhotse/issues/1026
+
+    Example::
+
+        >>> import lhotse
+        >>> lhotse.set_ffmpeg_torchaudio_info_enabled(False)  # don't use ffmpeg-torchaudio
+
+    :param enabled: Whether to use torchaudio to compute audio file duration.
+    """
+    global FFMPEG_TORCHAUDIO_INFO_ENABLED
+    if enabled != FFMPEG_TORCHAUDIO_INFO_ENABLED:
+        logging.info(
+            "The user overrided the global setting for whether to use ffmpeg-torchaudio "
+            "to compute the duration of audio files. "
+            f"Old setting: {FFMPEG_TORCHAUDIO_INFO_ENABLED}. "
+            f"New setting: {enabled}."
+        )
+    FFMPEG_TORCHAUDIO_INFO_ENABLED = enabled
 
 
 # TODO: document the dataclasses like this:
@@ -706,6 +735,39 @@ class Recording:
             transforms=transforms,
         )
 
+    def normalize_loudness(self, target: float, affix_id: bool = False) -> "Recording":
+        """
+        Return a new ``Recording`` that will lazily apply WPE dereverberation.
+
+        :param target: The target loudness (in dB) to normalize to.
+        :param affix_id: When true, we will modify the ``Recording.id`` field
+            by affixing it with "_ln{factor}".
+        :return: a modified copy of the current ``Recording``.
+        """
+        transforms = self.transforms.copy() if self.transforms is not None else []
+        transforms.append(LoudnessNormalization(target=target).to_dict())
+        return fastcopy(
+            self,
+            id=f"{self.id}_ln{target}" if affix_id else self.id,
+            transforms=transforms,
+        )
+
+    def dereverb_wpe(self, affix_id: bool = True) -> "Recording":
+        """
+        Return a new ``Recording`` that will lazily apply WPE dereverberation.
+
+        :param affix_id: When true, we will modify the ``Recording.id`` field
+            by affixing it with "_wpe".
+        :return: a modified copy of the current ``Recording``.
+        """
+        transforms = self.transforms.copy() if self.transforms is not None else []
+        transforms.append(DereverbWPE().to_dict())
+        return fastcopy(
+            self,
+            id=f"{self.id}_wpe" if affix_id else self.id,
+            transforms=transforms,
+        )
+
     def reverb_rir(
         self,
         rir_recording: Optional["Recording"] = None,
@@ -733,6 +795,10 @@ class Recording:
         :param source_rng_seed: The seed to be used for the source position.
         :return: the perturbed ``Recording``.
         """
+        if rir_recording is not None:
+            assert (
+                rir_recording.sampling_rate == self.sampling_rate
+            ), f"Sampling rate mismatch between RIR vs recording: {rir_recording.sampling_rate} vs {self.sampling_rate}."
 
         # We may need to change the `channel_ids` field according to whether we are convolving
         # with a multi-channel RIR or not.
@@ -891,7 +957,7 @@ class RecordingSet(Serializable, AlgorithmMixin):
             >>> recs_24k = recs.resample(24000)
     """
 
-    def __init__(self, recordings: Mapping[str, Recording] = None) -> None:
+    def __init__(self, recordings: Optional[Mapping[str, Recording]] = None) -> None:
         self.recordings = ifnone(recordings, {})
 
     def __eq__(self, other: "RecordingSet") -> bool:
@@ -1500,6 +1566,34 @@ class TorchaudioDefaultBackend(AudioBackend):
         )
 
 
+class TorchaudioFFMPEGBackend(AudioBackend):
+    """
+    A new FFMPEG backend available in torchaudio 2.0.
+    It should be free from many issues of soundfile and sox_io backends.
+    """
+
+    def read_audio(
+        self,
+        path_or_fd: Union[Pathlike, FileObject],
+        offset: Seconds = 0.0,
+        duration: Optional[Seconds] = None,
+        force_opus_sampling_rate: Optional[int] = None,
+    ) -> Tuple[np.ndarray, int]:
+        return torchaudio_2_ffmpeg_load(
+            path_or_fd=path_or_fd,
+            offset=offset,
+            duration=duration,
+        )
+
+    def is_applicable(self, path_or_fd: Union[Pathlike, FileObject]) -> bool:
+        """
+        FFMPEG backend requires at least Torchaudio 2.0.
+        For version == 2.0.x, we also need env var TORCHAUDIO_USE_BACKEND_DISPATCHER=1
+        For version >= 2.1.x, this will already be the default.
+        """
+        return torchaudio_2_0_ffmpeg_enabled()
+
+
 class LibsndfileBackend(AudioBackend):
     """
     A backend that uses PySoundFile.
@@ -1523,7 +1617,11 @@ class LibsndfileBackend(AudioBackend):
         )
 
     def handles_special_case(self, path_or_fd: Union[Pathlike, FileObject]) -> bool:
-        return not (sys.platform == "darwin") and isinstance(path_or_fd, BytesIO)
+        return (
+            not (sys.platform == "darwin")
+            and isinstance(path_or_fd, BytesIO)
+            and not torchaudio_2_0_ffmpeg_enabled()  # FFMPEG is preferable to this hack.
+        )
 
     def is_applicable(self, path_or_fd: Union[Pathlike, FileObject]) -> bool:
         # Technically it's applicable with regular files as well, but for now
@@ -1635,6 +1733,8 @@ def get_default_audio_backend():
             #   which can only be decoded by binaries "shorten" and "sph2pipe").
             FfmpegSubprocessOpusBackend(),
             Sph2pipeSubprocessBackend(),
+            # New FFMPEG backend available only in torchaudio 2.0.x+
+            TorchaudioFFMPEGBackend(),
             # Prefer libsndfile for in-memory buffers only
             LibsndfileBackend(),
             # Torchaudio should be able to deal with most audio types...
@@ -1696,10 +1796,31 @@ def torchaudio_supports_ffmpeg() -> bool:
     Returns ``True`` when torchaudio version is at least 0.12.0, which
     has support for FFMPEG streamer API.
     """
+    # If user has disabled ffmpeg-torchaudio, we don't need to check the version.
+    if not FFMPEG_TORCHAUDIO_INFO_ENABLED:
+        return False
+
     import torchaudio
     from packaging import version
 
     return version.parse(torchaudio.__version__) >= version.parse("0.12.0")
+
+
+@lru_cache(maxsize=1)
+def torchaudio_2_0_ffmpeg_enabled() -> bool:
+    """
+    Returns ``True`` when torchaudio.load supports "ffmpeg" backend.
+    This requires either version 2.1.x+ or 2.0.x with env var TORCHAUDIO_USE_BACKEND_DISPATCHER=1.
+    """
+    import torchaudio
+    from packaging import version
+
+    ver = version.parse(torchaudio.__version__)
+    if ver == version.parse("2.0.0"):
+        return os.environ.get("TORCHAUDIO_USE_BACKEND_DISPATCHER", "0") == "1"
+    if ver >= version.parse("2.1.0"):
+        return True
+    return False
 
 
 @lru_cache(maxsize=1)
@@ -1722,6 +1843,16 @@ def torchaudio_info(
     that we need to create a ``Recording`` manifest.
     """
     import torchaudio
+
+    if torchaudio_2_0_ffmpeg_enabled():
+        # Torchaudio 2.0 with official "ffmpeg" backend should solve all the special cases below.
+        info = torchaudio.info(path_or_fileobj, backend="ffmpeg")
+        return LibsndfileCompatibleAudioInfo(
+            channels=info.num_channels,
+            frames=info.num_frames,
+            samplerate=int(info.sample_rate),
+            duration=info.num_frames / info.sample_rate,
+        )
 
     is_mp3 = isinstance(path_or_fileobj, (str, Path)) and str(path_or_fileobj).endswith(
         ".mp3"
@@ -1779,13 +1910,14 @@ def torchaudio_load(
 
     # Need to grab the "info" about sampling rate before reading to compute
     # the number of samples provided in offset / num_frames.
-    audio_info = torchaudio_info(path_or_fd)
     frame_offset = 0
     num_frames = -1
-    if offset > 0:
-        frame_offset = compute_num_samples(offset, audio_info.samplerate)
-    if duration is not None:
-        num_frames = compute_num_samples(duration, audio_info.samplerate)
+    if offset > 0 or duration is not None:
+        audio_info = torchaudio_info(path_or_fd)
+        if offset > 0:
+            frame_offset = compute_num_samples(offset, audio_info.samplerate)
+        if duration is not None:
+            num_frames = compute_num_samples(duration, audio_info.samplerate)
     if isinstance(path_or_fd, IOBase):
         # Set seek pointer to the beginning of the file as torchaudio.info
         # might have left it at the end of the header
@@ -1794,6 +1926,34 @@ def torchaudio_load(
         path_or_fd,
         frame_offset=frame_offset,
         num_frames=num_frames,
+    )
+    return audio.numpy(), int(sampling_rate)
+
+
+def torchaudio_2_ffmpeg_load(
+    path_or_fd: Pathlike, offset: Seconds = 0, duration: Optional[Seconds] = None
+) -> Tuple[np.ndarray, int]:
+    import torchaudio
+
+    # Need to grab the "info" about sampling rate before reading to compute
+    # the number of samples provided in offset / num_frames.
+    frame_offset = 0
+    num_frames = -1
+    if offset > 0 or duration is not None:
+        audio_info = torchaudio.info(path_or_fd, backend="ffmpeg")
+        if offset > 0:
+            frame_offset = compute_num_samples(offset, audio_info.samplerate)
+        if duration is not None:
+            num_frames = compute_num_samples(duration, audio_info.samplerate)
+    if isinstance(path_or_fd, IOBase):
+        # Set seek pointer to the beginning of the file as torchaudio.info
+        # might have left it at the end of the header
+        path_or_fd.seek(0)
+    audio, sampling_rate = torchaudio.load(
+        path_or_fd,
+        frame_offset=frame_offset,
+        num_frames=num_frames,
+        backend="ffmpeg",
     )
     return audio.numpy(), int(sampling_rate)
 
