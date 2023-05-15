@@ -12,7 +12,7 @@ from typing import Dict, Optional, Union
 import soundfile as sf
 from datasets import load_dataset
 from tqdm import tqdm
-from tqdm.contrib.concurrent import thread_map
+from p_tqdm import p_map
 
 from lhotse import validate_recordings_and_supervisions
 from lhotse.audio import Recording, RecordingSet
@@ -63,7 +63,7 @@ def download_commonvoice_phonemes(
         split_dir = corpus_dir / split
         split_dir.mkdir(parents=True, exist_ok=True)
 
-        thread_map(save_audio_file, dataset[split])
+        p_map(save_audio_file, dataset[split])
 
     return corpus_dir
 
