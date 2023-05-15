@@ -10,7 +10,7 @@ from typing import Dict, Optional, Union
 
 import soundfile as sf
 from datasets import load_dataset
-from tqdm.contrib.concurrent import process_map
+from tqdm.contrib.concurrent import thread_map
 
 from lhotse import validate_recordings_and_supervisions
 from lhotse.audio import Recording, RecordingSet
@@ -61,7 +61,7 @@ def download_bookbot_huggingface(
         split_dir = corpus_dir / split
         split_dir.mkdir(parents=True, exist_ok=True)
 
-        process_map(save_audio_file, dataset[split])
+        thread_map(save_audio_file, dataset[split])
 
     return corpus_dir
 
