@@ -12,12 +12,13 @@ from typing import Dict, Optional, Union
 import soundfile as sf
 from datasets import load_dataset
 from tqdm import tqdm
-from p_tqdm import p_map
+from tqdm.contrib.concurrent import process_map
 
 from lhotse import validate_recordings_and_supervisions
 from lhotse.audio import Recording, RecordingSet
 from lhotse.supervision import SupervisionSegment, SupervisionSet
 from lhotse.utils import Pathlike
+
 
 def download_commonvoice_phonemes(
     dataset_name: str,
@@ -31,6 +32,7 @@ def download_commonvoice_phonemes(
     :param use_phonemes: bool, whether or not to use phonemes.
     :return: the path to downloaded and extracted directory with data.
     """
+
     def save_audio_file(datum):
         path, audio_array, sr = datum["audio"].values()
         path = path.replace(".mp3", ".wav")
@@ -61,9 +63,10 @@ def download_commonvoice_phonemes(
         split_dir = corpus_dir / split
         split_dir.mkdir(parents=True, exist_ok=True)
 
-        p_map(save_audio_file, dataset[split])
+        process_map(save_audio_file, dataset[split])
 
     return corpus_dir
+
 
 def prepare_commonvoice_phonemes(
     corpus_dir: Pathlike,
@@ -130,7 +133,9 @@ def prepare_commonvoice_phonemes(
             supervision_set.to_file(
                 output_dir / f"commonvoice_supervisions_{split}.jsonl.gz"
             )
-            recording_set.to_file(output_dir / f"commonvoice_recordings_{split}.jsonl.gz")
+            recording_set.to_file(
+                output_dir / f"commonvoice_recordings_{split}.jsonl.gz"
+            )
 
         manifests[split] = {
             "recordings": recording_set,

@@ -10,7 +10,7 @@ from typing import Dict, Optional, Union
 
 import soundfile as sf
 from datasets import load_dataset
-from tqdm import tqdm
+from tqdm.contrib.concurrent import process_map
 
 from lhotse import validate_recordings_and_supervisions
 from lhotse.audio import Recording, RecordingSet
@@ -29,6 +29,25 @@ def download_bookbot_huggingface(
     :param target_dir: Pathlike, the path of the dir to store the dataset.
     :return: the path to downloaded and extracted directory with data.
     """
+
+    def save_audio_file(datum):
+        audio_path, audio_array, sr = datum["audio"].values()
+        audio_path = Path(audio_path)
+        text = f" {word_delimiter_token} ".join(datum["phonemes_ipa"])
+        language = datum["language"]
+
+        lang_dir = split_dir / language
+        lang_dir.mkdir(parents=True, exist_ok=True)
+
+        sf.write(
+            str(lang_dir / audio_path.with_suffix(".wav")),
+            audio_array,
+            samplerate=sr,
+            format="wav",
+        )
+        with open(str(lang_dir / audio_path.with_suffix(".txt")), "w") as f:
+            f.write(text)
+
     target_dir = Path(target_dir)
     target_dir.mkdir(parents=True, exist_ok=True)
 
@@ -42,23 +61,7 @@ def download_bookbot_huggingface(
         split_dir = corpus_dir / split
         split_dir.mkdir(parents=True, exist_ok=True)
 
-        for datum in tqdm(dataset[split]):
-            audio_path, audio_array, sr = datum["audio"].values()
-            audio_path = Path(audio_path)
-            text = f" {word_delimiter_token} ".join(datum["phonemes_ipa"])
-            language = datum["language"]
-
-            lang_dir = split_dir / language
-            lang_dir.mkdir(parents=True, exist_ok=True)
-
-            sf.write(
-                str(lang_dir / audio_path.with_suffix(".wav")),
-                audio_array,
-                samplerate=sr,
-                format="wav",
-            )
-            with open(str(lang_dir / audio_path.with_suffix(".txt")), "w") as f:
-                f.write(text)
+        process_map(save_audio_file, dataset[split])
 
     return corpus_dir
 
