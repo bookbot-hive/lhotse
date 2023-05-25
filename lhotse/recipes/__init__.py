@@ -37,6 +37,7 @@ from .fisher_spanish import prepare_fisher_spanish
 from .gale_arabic import prepare_gale_arabic
 from .gale_mandarin import prepare_gale_mandarin
 from .gigaspeech import prepare_gigaspeech
+from .hallway import download_hallway_noise, prepare_hallway_noise
 from .heroico import download_heroico, prepare_heroico
 from .hifitts import download_hifitts, prepare_hifitts
 from .himia import download_himia, prepare_himia

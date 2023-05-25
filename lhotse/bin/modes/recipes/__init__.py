@@ -36,6 +36,7 @@ from .fisher_spanish import *
 from .gale_arabic import *
 from .gale_mandarin import *
 from .gigaspeech import *
+from .hallway import *
 from .heroico import *
 from .hifitts import *
 from .himia import *
