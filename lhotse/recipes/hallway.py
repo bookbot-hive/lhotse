@@ -62,7 +62,7 @@ def prepare_hallway_noise(
         "noise": {
             "recordings": RecordingSet.from_recordings(
                 Recording.from_file(file) for file in corpus_dir.rglob("*.wav")
-            )
+            ).resample(16_000)
         }
     }
     validate(manifests["noise"]["recordings"])
