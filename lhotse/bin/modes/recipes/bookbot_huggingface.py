@@ -14,21 +14,41 @@ __all__ = ["bookbot_huggingface"]
 @click.argument("corpus_dir", type=click.Path(exists=True, dir_okay=True))
 @click.argument("output_dir", type=click.Path())
 @click.option(
+    "--normalize-words",
+    type=bool,
+    default=False,
+    help="Whether to normalize words",
+)
+@click.option(
     "--normalize-phonemes",
     type=bool,
     default=False,
     help="Whether to normalize phonemes",
 )
 def bookbot_huggingface(
-    corpus_dir: Pathlike, output_dir: Pathlike, normalize_phonemes: bool
+    corpus_dir: Pathlike,
+    output_dir: Pathlike,
+    normalize_words: bool,
+    normalize_phonemes: bool,
 ):
     """Bookbot data preparation."""
-    prepare_bookbot_huggingface(corpus_dir, output_dir, normalize_phonemes)
+    prepare_bookbot_huggingface(
+        corpus_dir, output_dir, normalize_words, normalize_phonemes
+    )
 
 
 @download.command(context_settings=dict(show_default=True))
 @click.argument("dataset_name", type=str)
 @click.argument("target_dir", type=click.Path())
-def bookbot_huggingface(dataset_name: str, target_dir: Pathlike):
+@click.argument("text_column_name", type=str)
+@click.argument("word_delimiter_token", type=str)
+def bookbot_huggingface(
+    dataset_name: str,
+    target_dir: Pathlike,
+    text_column_name: str,
+    word_delimiter_token: str,
+):
     """Bookbot download."""
-    download_bookbot_huggingface(dataset_name, target_dir)
+    download_bookbot_huggingface(
+        dataset_name, target_dir, text_column_name, word_delimiter_token
+    )

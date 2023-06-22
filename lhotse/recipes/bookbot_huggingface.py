@@ -4,6 +4,7 @@
 # Apache 2.0
 
 import logging
+import re
 from collections import defaultdict
 from pathlib import Path
 from typing import Dict, Optional, Union
@@ -22,7 +23,8 @@ from lhotse.utils import Pathlike
 def download_bookbot_huggingface(
     dataset_name: str,
     target_dir: Pathlike = ".",
-    word_delimiter_token: Optional[str] = "|",
+    text_column_name: str = "phonemes_ipa",
+    word_delimiter_token: str = " | ",
 ) -> Path:
     """
     Download and unzip any Bookbot phoneme dataset from HuggingFace.
@@ -34,7 +36,7 @@ def download_bookbot_huggingface(
     def save_audio_file(datum):
         audio_path, audio_array, sr = datum["audio"].values()
         audio_path = Path(audio_path)
-        text = f" {word_delimiter_token} ".join(datum["phonemes_ipa"])
+        text = word_delimiter_token.join(datum[text_column_name])
         language = datum["language"]
 
         lang_dir = split_dir / language
@@ -70,6 +72,7 @@ def download_bookbot_huggingface(
 def prepare_bookbot_huggingface(
     corpus_dir: Pathlike,
     output_dir: Optional[Pathlike] = None,
+    normalize_words: bool = False,
     normalize_phonemes: bool = False,
 ) -> Dict[str, Dict[str, Union[RecordingSet, SupervisionSet]]]:
     """
@@ -114,6 +117,9 @@ def prepare_bookbot_huggingface(
                         diacritics = ["ː", "ˑ", "̆", "̯", "͡", "‿", "͜", "̩", "ˈ", "ˌ"]
                         for d in diacritics:
                             text = text.replace(d, "")
+
+                    if normalize_words:
+                        text = re.sub('[\,\?\.\!\-\;\:"\“\%\‘\”\�]', "", text).lower()
 
                 recording = Recording.from_file(wav_file, recording_id=idx)
 
