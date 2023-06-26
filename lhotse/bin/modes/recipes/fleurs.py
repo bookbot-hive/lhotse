@@ -64,8 +64,8 @@ def fleurs(
 def fleurs(
     target_dir: Pathlike,
     languages: List[str],
-):
-    """Commonvoice download."""
+) -> None:
+    """Fleurs download."""
     download_fleurs(
         target_dir=target_dir,
         languages=languages,

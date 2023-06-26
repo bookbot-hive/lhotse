@@ -34,14 +34,14 @@ def download_fleurs(
     base_url: str = DEFAULT_FLEURS_URL,    
 ):
     """
-    Download and untar the CommonVoice dataset.
+    Download and untar the FLEURS dataset.
 
     :param target_dir: Pathlike, the path of the dir to storage the dataset.
     :param languages: one of: 'all' (downloads all known languages); a single language code (e.g., 'en'),
         or a list of language codes.
     :param force_download: Bool, if True, download the tars no matter if the tars exist.
-    :param base_url: str, the base URL for CommonVoice.
-    :param release: str, the name of the CommonVoice release (e.g., "cv-corpus-8.0-2022-01-19").
+    :param base_url: str, the base URL for FLEURS.
+    :param release: str, the name of the FLEURS release (e.g., "cv-corpus-8.0-2022-01-19").
         It is used as part of the download URL.
     """
 
@@ -55,9 +55,9 @@ def download_fleurs(
         languages = list(languages)
 
     logging.info(
-        f"About to download {len(languages)} Fleurs languages: {languages}"
+        f"About to download {len(languages)} FLEURS languages: {languages}"
     )
-    for lang in tqdm(languages, desc="Downloading Fleurs languages"):
+    for lang in tqdm(languages, desc="Downloading FLEURS languages"):
         target_dir = Path(target_dir) / lang
         target_dir.mkdir(parents=True, exist_ok=True)
         
@@ -127,18 +127,18 @@ def prepare_fleurs(
     """
     if not is_module_available("pandas"):
         raise ValueError(
-            "To prepare CommonVoice data, please 'pip install pandas' first."
+            "To prepare FLEURS data, please 'pip install pandas' first."
         )
     if num_jobs > 1:
         warnings.warn(
-            "num_jobs>1 currently not supported for Fleurs data prep;"
+            "num_jobs>1 currently not supported for FLEURS data prep;"
             "setting to 1."
         )
 
     corpus_dir = Path(corpus_dir)
     assert corpus_dir.is_dir(), f"No such directory: {corpus_dir}"
     assert output_dir is not None, (
-        "Fleurs recipe requires to specify the output "
+        "FLEURS recipe requires to specify the output "
         "manifest directory (output_dir cannot be None)."
     )
     output_dir = Path(output_dir)
@@ -150,14 +150,14 @@ def prepare_fleurs(
         )
         if not languages:
             raise ValueError(
-                f"Could not find any of Fleurs languages in: {corpus_dir}"
+                f"Could not find any of FLEURS languages in: {corpus_dir}"
             )
     elif isinstance(languages, str):
         languages = [languages]
 
     manifests = {}
 
-    for lang in tqdm(languages, desc="Processing Fleurs languages"):
+    for lang in tqdm(languages, desc="Processing FLEURS languages"):
         logging.info(f"Language: {lang}")
         lang_path = corpus_dir / lang
 
@@ -171,10 +171,10 @@ def prepare_fleurs(
             logging.info(f"Split: {part}")
             if part in lang_manifests:
                 logging.info(
-                    f"Fleurs language: {lang} already prepared - skipping."
+                    f"FLEURS language: {lang} already prepared - skipping."
                 )
                 continue
-            recording_set, supervision_set = prepare_single_commonvoice_tsv(
+            recording_set, supervision_set = prepare_single_fleurs_tsv(
                 lang=lang,
                 part=part,
                 output_dir=output_dir,
@@ -208,26 +208,26 @@ def read_cv_manifests_if_cached(
             manifests[part][manifest] = load_manifest(path)
     return manifests
 
-def prepare_single_commonvoice_tsv(
+def prepare_single_fleurs_tsv(
     lang: str,
     part: str,
     output_dir: Pathlike,
     lang_path: Pathlike,
 ) -> Tuple[RecordingSet, SupervisionSet]:
     """
-    Prepares part of CommonVoice data from a single TSV file.
+    Prepares part of FLEURS data from a single TSV file.
 
     :param lang: string language code (e.g., "en").
     :param part: which split to prepare (e.g., "train", "validated", etc.).
     :param output_dir: path to directory where we will store the manifests.
-    :param lang_path: path to a CommonVoice directory for a specific language
+    :param lang_path: path to a FLEURS directory for a specific language
         (e.g., "/path/to/cv-corpus-7.0-2021-07-21/pl").
     :return: a tuple of (RecordingSet, SupervisionSet) objects opened in lazy mode,
-        as CommonVoice manifests may be fairly large in memory.
+        as FLEURS manifests may be fairly large in memory.
     """
     if not is_module_available("pandas"):
         raise ValueError(
-            "To prepare CommonVoice data, please 'pip install pandas' first."
+            "To prepare FLEURS data, please 'pip install pandas' first."
         )
     import pandas as pd
 
