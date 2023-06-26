@@ -33,6 +33,7 @@ from .edacc import *
 from .eval2000 import *
 from .fisher_english import *
 from .fisher_spanish import *
+from .fleurs import *
 from .gale_arabic import *
 from .gale_mandarin import *
 from .gigaspeech import *
@@ -73,3 +74,4 @@ from .voxceleb import *
 from .wenet_speech import *
 from .xbmu_amdo31 import *
 from .yesno import *
+
