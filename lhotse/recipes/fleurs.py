@@ -163,7 +163,7 @@ def prepare_fleurs(
 
         # Maybe the manifests already exist: we can read them and save a bit of preparation time.
         # Pattern: "cv_recordings_en_train.jsonl.gz" / "cv_supervisions_en_train.jsonl.gz"
-        lang_manifests = read_cv_manifests_if_cached(
+        lang_manifests = read_fleurs_manifests_if_cached(
             output_dir=output_dir, language=lang
         )
 
@@ -189,7 +189,7 @@ def prepare_fleurs(
 
     return manifests
 
-def read_cv_manifests_if_cached(
+def read_fleurs_manifests_if_cached(
     output_dir: Optional[Pathlike],
     language: str,
 ) -> Dict[str, Dict[str, Union[RecordingSet, SupervisionSet]]]:
@@ -202,7 +202,7 @@ def read_cv_manifests_if_cached(
     manifests = defaultdict(dict)
     for part in FLEURS_SPLITS:
         for manifest in ["recordings", "supervisions"]:
-            path = output_dir / f"cv_{manifest}_{language}_{part}.jsonl.gz"
+            path = output_dir / f"fleurs_{manifest}_{language}_{part}.jsonl.gz"
             if not path.is_file():
                 continue
             manifests[part][manifest] = load_manifest(path)
@@ -239,10 +239,10 @@ def prepare_single_fleurs_tsv(
     df = pd.read_csv(tsv_path, sep="\t", quoting=csv.QUOTE_NONE, names=["transcript_id", "path", "raw_transcript", "transcript", "_", "client_id", "gender"])
     # Scan all the audio files
     with RecordingSet.open_writer(
-        output_dir / f"cv-{lang}_recordings_{part}.jsonl.gz",
+        output_dir / f"fleurs-{lang}_recordings_{part}.jsonl.gz",
         overwrite=False,
     ) as recs_writer, SupervisionSet.open_writer(
-        output_dir / f"cv-{lang}_supervisions_{part}.jsonl.gz",
+        output_dir / f"fleurs-{lang}_supervisions_{part}.jsonl.gz",
         overwrite=False,
     ) as sups_writer:
         for idx, row in tqdm(
