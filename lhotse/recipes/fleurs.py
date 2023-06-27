@@ -58,7 +58,7 @@ def download_fleurs(
         f"About to download {len(languages)} FLEURS languages: {languages}"
     )
     for lang in tqdm(languages, desc="Downloading FLEURS languages"):
-        target_dir = Path(target_dir) / lang
+        target_dir = Path(target_dir) / "fleurs" / lang
         target_dir.mkdir(parents=True, exist_ok=True)
         
         logging.info(f"Language: {lang}")
