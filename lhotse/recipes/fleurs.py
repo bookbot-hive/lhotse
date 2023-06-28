@@ -16,9 +16,7 @@ from lhotse.audio import Recording, RecordingSet
 from lhotse.supervision import SupervisionSegment, SupervisionSet
 from lhotse.utils import Pathlike, is_module_available, resumable_download, safe_extract
 
-DEFAULT_FLEURS_URL = (
-    "https://huggingface.co/datasets/google/fleurs/resolve/main/data"
-)
+DEFAULT_FLEURS_URL = "https://huggingface.co/datasets/google/fleurs/resolve/main/data"
 
 
 FLEURS_LANGS = "af_za am_et ar_eg as_in ast_es az_az be_by bg_bg bn_in bs_ba ca_es ceb_ph ckb_iq cmn_hans_cn cs_cz cy_gb da_dk de_de el_gr en_us es_419 et_ee fa_ir ff_sn fi_fi fil_ph fr_fr ga_ie gl_es gu_in ha_ng he_il hi_in hr_hr hu_hu hy_am id_id ig_ng is_is it_it ja_jp jv_id ka_ge kam_ke kea_cv kk_kz km_kh kn_in ko_kr ky_kg".split()
@@ -27,11 +25,12 @@ FLEURS_SPLITS = ("test", "dev", "train")
 # TODO: a list of mapping from language codes (e.g., "en") to actual language names (e.g., "US English")
 FLEURS_CODE2LANG = {"id_id": "Indonesian"}
 
+
 def download_fleurs(
     target_dir: Pathlike = ".",
     languages: Union[str, Iterable[str]] = "all",
     force_download: bool = False,
-    base_url: str = DEFAULT_FLEURS_URL,    
+    base_url: str = DEFAULT_FLEURS_URL,
 ):
     """
     Download and untar the FLEURS dataset.
@@ -41,8 +40,6 @@ def download_fleurs(
         or a list of language codes.
     :param force_download: Bool, if True, download the tars no matter if the tars exist.
     :param base_url: str, the base URL for FLEURS.
-    :param release: str, the name of the FLEURS release (e.g., "cv-corpus-8.0-2022-01-19").
-        It is used as part of the download URL.
     """
 
     url = f"{base_url}"
@@ -54,13 +51,11 @@ def download_fleurs(
     else:
         languages = list(languages)
 
-    logging.info(
-        f"About to download {len(languages)} FLEURS languages: {languages}"
-    )
+    logging.info(f"About to download {len(languages)} FLEURS languages: {languages}")
     for lang in tqdm(languages, desc="Downloading FLEURS languages"):
         target_dir = Path(target_dir) / "fleurs" / lang
         target_dir.mkdir(parents=True, exist_ok=True)
-        
+
         logging.info(f"Language: {lang}")
         # Split directory exists and seem valid? Skip this split.
         completed_detector = target_dir / ".completed"
@@ -77,7 +72,7 @@ def download_fleurs(
                     single_url, filename=tar_path, force_download=force_download
                 )
                 logging.info(f"Downloading finished: {lang}")
-                
+
             csv_name = f"{split}.tsv"
             csv_path = target_dir / csv_name
             if force_download or not csv_path.is_file():
@@ -86,7 +81,7 @@ def download_fleurs(
                     single_url, filename=csv_path, force_download=force_download
                 )
                 logging.info(f"Downloading finished: {lang}")
-            
+
             # Unpack everything.
             logging.info(f"Unpacking archive: {lang}, split: {split}")
             # shutil.rmtree(part_dir, ignore_errors=True)
@@ -109,9 +104,9 @@ def prepare_fleurs(
     This function expects the input directory structure of::
 
         >>> metadata_path = corpus_dir / language_code / "{train,dev,test}.tsv"
-        >>> # e.g. pl_train_metadata_path = "/path/to/cv-corpus-7.0-2021-07-21/pl/train.tsv"
-        >>> audio_path = corpus_dir / language_code / "clips"
-        >>> # e.g. pl_audio_path = "/path/to/cv-corpus-7.0-2021-07-21/pl/clips"
+        >>> # e.g. pl_train_metadata_path = "/path/to/fleurs/id_id/train.tsv"
+        >>> audio_path = corpus_dir / language_code / split
+        >>> # e.g. pl_audio_path = "/path/to/fleurs/id_id/train"
 
     Returns a dict with 3-level structure (lang -> split -> manifest-type)::
 
@@ -126,13 +121,10 @@ def prepare_fleurs(
     :return: a dict with manifests for all specified languagues and their train/dev/test splits.
     """
     if not is_module_available("pandas"):
-        raise ValueError(
-            "To prepare FLEURS data, please 'pip install pandas' first."
-        )
+        raise ValueError("To prepare FLEURS data, please 'pip install pandas' first.")
     if num_jobs > 1:
         warnings.warn(
-            "num_jobs>1 currently not supported for FLEURS data prep;"
-            "setting to 1."
+            "num_jobs>1 currently not supported for FLEURS data prep;" "setting to 1."
         )
 
     corpus_dir = Path(corpus_dir)
@@ -149,9 +141,7 @@ def prepare_fleurs(
             path.name for path in corpus_dir.glob("*")
         )
         if not languages:
-            raise ValueError(
-                f"Could not find any of FLEURS languages in: {corpus_dir}"
-            )
+            raise ValueError(f"Could not find any of FLEURS languages in: {corpus_dir}")
     elif isinstance(languages, str):
         languages = [languages]
 
@@ -162,7 +152,7 @@ def prepare_fleurs(
         lang_path = corpus_dir / lang
 
         # Maybe the manifests already exist: we can read them and save a bit of preparation time.
-        # Pattern: "cv_recordings_en_train.jsonl.gz" / "cv_supervisions_en_train.jsonl.gz"
+        # Pattern: "fleurs_recordings_id_id_train.jsonl.gz" / "fleurs_supervisions_id_id_train.jsonl.gz"
         lang_manifests = read_fleurs_manifests_if_cached(
             output_dir=output_dir, language=lang
         )
@@ -170,9 +160,7 @@ def prepare_fleurs(
         for part in splits:
             logging.info(f"Split: {part}")
             if part in lang_manifests:
-                logging.info(
-                    f"FLEURS language: {lang} already prepared - skipping."
-                )
+                logging.info(f"FLEURS language: {lang} already prepared - skipping.")
                 continue
             recording_set, supervision_set = prepare_single_fleurs_tsv(
                 lang=lang,
@@ -188,6 +176,7 @@ def prepare_fleurs(
         manifests[lang] = lang_manifests
 
     return manifests
+
 
 def read_fleurs_manifests_if_cached(
     output_dir: Optional[Pathlike],
@@ -208,6 +197,7 @@ def read_fleurs_manifests_if_cached(
             manifests[part][manifest] = load_manifest(path)
     return manifests
 
+
 def prepare_single_fleurs_tsv(
     lang: str,
     part: str,
@@ -221,14 +211,12 @@ def prepare_single_fleurs_tsv(
     :param part: which split to prepare (e.g., "train", "validated", etc.).
     :param output_dir: path to directory where we will store the manifests.
     :param lang_path: path to a FLEURS directory for a specific language
-        (e.g., "/path/to/cv-corpus-7.0-2021-07-21/pl").
+        (e.g., "/path/to/fleurs/id_id").
     :return: a tuple of (RecordingSet, SupervisionSet) objects opened in lazy mode,
         as FLEURS manifests may be fairly large in memory.
     """
     if not is_module_available("pandas"):
-        raise ValueError(
-            "To prepare FLEURS data, please 'pip install pandas' first."
-        )
+        raise ValueError("To prepare FLEURS data, please 'pip install pandas' first.")
     import pandas as pd
 
     lang_path = Path(lang_path)
@@ -236,7 +224,20 @@ def prepare_single_fleurs_tsv(
     tsv_path = lang_path / f"{part}.tsv"
 
     # Read the metadata
-    df = pd.read_csv(tsv_path, sep="\t", quoting=csv.QUOTE_NONE, names=["transcript_id", "path", "raw_transcript", "transcript", "_", "client_id", "gender"])
+    df = pd.read_csv(
+        tsv_path,
+        sep="\t",
+        quoting=csv.QUOTE_NONE,
+        names=[
+            "transcript_id",
+            "path",
+            "raw_transcript",
+            "transcript",
+            "_",
+            "client_id",
+            "gender",
+        ],
+    )
     # Scan all the audio files
     with RecordingSet.open_writer(
         output_dir / f"fleurs-{lang}_recordings_{part}.jsonl.gz",
