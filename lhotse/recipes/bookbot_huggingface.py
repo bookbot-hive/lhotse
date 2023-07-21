@@ -25,6 +25,7 @@ def download_bookbot_huggingface(
     target_dir: Pathlike = ".",
     text_column_name: str = "phonemes_ipa",
     word_delimiter_token: str = " | ",
+    max_train_samples: Optional[int] = None,
 ) -> Path:
     """
     Download and unzip any Bookbot phoneme dataset from HuggingFace.
@@ -61,6 +62,11 @@ def download_bookbot_huggingface(
     corpus_dir = target_dir / corpus_name
 
     for split in splits:
+        if max_train_samples:
+            dataset[split] = dataset[split].shuffle(seed=41).select(
+                range(min(len(dataset[split]), max_train_samples))
+            )
+
         split_dir = corpus_dir / split
         split_dir.mkdir(parents=True, exist_ok=True)
 

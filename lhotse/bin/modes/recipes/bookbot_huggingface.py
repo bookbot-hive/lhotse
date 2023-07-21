@@ -42,13 +42,24 @@ def bookbot_huggingface(
 @click.argument("target_dir", type=click.Path())
 @click.argument("text_column_name", type=str)
 @click.argument("word_delimiter_token", type=str)
+@click.option(
+    "--max-train-samples",
+    type=int,
+    default=None,
+    help="Maximum number of train samples",
+)
 def bookbot_huggingface(
     dataset_name: str,
     target_dir: Pathlike,
     text_column_name: str,
     word_delimiter_token: str,
+    max_train_samples: int,
 ):
     """Bookbot download."""
     download_bookbot_huggingface(
-        dataset_name, target_dir, text_column_name, word_delimiter_token
+        dataset_name,
+        target_dir,
+        text_column_name,
+        word_delimiter_token,
+        max_train_samples,
     )
