@@ -63,8 +63,10 @@ def download_bookbot_huggingface(
 
     for split in splits:
         if max_train_samples:
-            dataset[split] = dataset[split].shuffle(seed=41).select(
-                range(min(len(dataset[split]), max_train_samples))
+            dataset[split] = (
+                dataset[split]
+                .shuffle(seed=41)
+                .select(range(min(len(dataset[split]), max_train_samples)))
             )
 
         split_dir = corpus_dir / split
@@ -80,6 +82,7 @@ def prepare_bookbot_huggingface(
     output_dir: Optional[Pathlike] = None,
     normalize_words: bool = False,
     normalize_phonemes: bool = False,
+    sampling_rate: int = 16000,
 ) -> Dict[str, Dict[str, Union[RecordingSet, SupervisionSet]]]:
     """
     Returns the manifests which consists of the Recodings and Supervisions.
@@ -143,7 +146,9 @@ def prepare_bookbot_huggingface(
                 recordings.append(recording)
                 supervisions.append(segment)
 
-            recording_set = RecordingSet.from_recordings(recordings).resample(16000)
+            recording_set = RecordingSet.from_recordings(recordings).resample(
+                sampling_rate
+            )
             supervision_set = SupervisionSet.from_segments(supervisions)
             validate_recordings_and_supervisions(recording_set, supervision_set)
 

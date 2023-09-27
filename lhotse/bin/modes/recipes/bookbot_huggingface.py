@@ -25,15 +25,22 @@ __all__ = ["bookbot_huggingface"]
     default=False,
     help="Whether to normalize phonemes",
 )
+@click.option(
+    "--sampling-rate",
+    type=int,
+    default=16000,
+    help="Audio sampling rate",
+)
 def bookbot_huggingface(
     corpus_dir: Pathlike,
     output_dir: Pathlike,
     normalize_words: bool,
     normalize_phonemes: bool,
+    sampling_rate: int,
 ):
     """Bookbot data preparation."""
     prepare_bookbot_huggingface(
-        corpus_dir, output_dir, normalize_words, normalize_phonemes
+        corpus_dir, output_dir, normalize_words, normalize_phonemes, sampling_rate
     )
 
 
