@@ -180,6 +180,16 @@ def mixed_audio_cut() -> MixedCut:
     return mixed_cut
 
 
+@pytest.fixture
+def offseted_mixed_audio_cut() -> MixedCut:
+    cut_set = CutSet.from_json(
+        "test/fixtures/mix_cut_test/offseted_audio_cut_manifest.json"
+    )
+    mixed_cut = cut_set["mixed-cut-id"]
+    assert isclose(mixed_cut.duration, 16.66)
+    return mixed_cut
+
+
 def test_mixed_cut_load_audio_mixed(mixed_audio_cut):
     audio = mixed_audio_cut.load_audio()
     assert audio.shape == (1, 230400)
@@ -191,6 +201,11 @@ def test_mixed_cut_load_audio_unmixed(mixed_audio_cut):
     assert len(audio) == 2
     assert audio[0].shape == (1, 230400)
     assert audio[1].shape == (1, 230400)
+
+
+def test_mixed_cut_load_offseted_mixed(offseted_mixed_audio_cut):
+    audio = offseted_mixed_audio_cut.load_audio()
+    assert audio.shape == (1, 266560)
 
 
 @pytest.mark.parametrize(
@@ -324,6 +339,12 @@ def test_mix_cut_snr(libri_cut):
     assert E(feats) > E(feats_snr)
 
 
+def test_mix_cut_with_other_raises_error(libri_cut):
+    libri_cut = libri_cut.drop_features()
+    with pytest.raises(ValueError):
+        _ = libri_cut.mix(libri_cut.recording)
+
+
 def test_mix_cut_snr_truncate_snr_reference(libri_cut):
     mixed = libri_cut.pad(duration=20).mix(libri_cut, offset_other_by=10)
     mixed_snr = libri_cut.pad(duration=20).mix(libri_cut, offset_other_by=10, snr=10)
@@ -445,3 +466,28 @@ def test_cut_set_mix_snr_is_randomized():
     assert 0 <= c1.tracks[1].snr <= 10
 
     assert c0.tracks[1].snr != c1.tracks[1].snr
+
+
+def test_cut_set_mix_is_lazy():
+    cuts = DummyManifest(CutSet, begin_id=0, end_id=2)
+
+    mixed = cuts.mix(cuts, snr=10, mix_prob=1.0, seed=0)
+
+    assert mixed.is_lazy
+
+
+def test_cut_set_mix_size_is_not_growing():
+    cuts = DummyManifest(CutSet, begin_id=0, end_id=100)
+    noise_cuts = DummyManifest(CutSet, begin_id=10, end_id=20)
+
+    mixed_cuts = cuts.mix(
+        cuts=noise_cuts,
+        duration=None,
+        snr=10,
+        mix_prob=0.1,
+        preserve_id=None,
+        seed=42,
+        random_mix_offset=True,
+    ).to_eager()
+
+    assert len(mixed_cuts) == len(cuts)

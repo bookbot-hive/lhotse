@@ -6,7 +6,8 @@ import torch
 from torch.utils.data import IterableDataset
 
 from lhotse import RecordingSet, Seconds, compute_num_samples, validate
-from lhotse.audio import suppress_audio_loading_errors, torchaudio_supports_ffmpeg
+from lhotse.audio.backend import torchaudio_supports_ffmpeg
+from lhotse.audio.utils import suppress_audio_loading_errors
 from lhotse.augmentation import AugmentFn
 from lhotse.cut import CutSet
 from lhotse.dataset.collation import collate_audio, collate_features, collate_matrices
@@ -130,6 +131,7 @@ class RecordingChunkIterableDataset(IterableDataset):
     overlapping audio chunks.
 
     The format of yielded items is the following::
+
         {
             "recording_id": str
             "begin_time": tensor with dtype=float32 shape=(1,)

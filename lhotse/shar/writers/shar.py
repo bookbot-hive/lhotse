@@ -1,10 +1,8 @@
 import warnings
 from functools import partial
-from typing import Dict, List, Optional, Tuple, Type, TypeVar, Union
+from typing import Dict, List, Literal, Optional, Tuple, Type, Union
 
-from typing_extensions import Literal
-
-from lhotse import AudioSource, Features, fastcopy
+from lhotse import fastcopy
 from lhotse.array import Array, TemporalArray
 from lhotse.audio import Recording
 from lhotse.cut import Cut
@@ -36,15 +34,19 @@ class SharWriter:
     with new fields.
 
     The user has to specify which fields should be saved, and what compression to use for each of them.
-    Currently we support ``wav``, ``flac``, and ``mp3`` compression for ``recording`` and custom audio fields,
+    Currently we support ``wav``, ``flac``, ``opus``, and ``mp3`` compression for ``recording`` and custom audio fields,
     and ``lilcom`` or ``numpy`` for ``features`` and custom array fields.
 
     Example::
 
         >>> cuts = CutSet(...)  # cuts have 'recording' and 'features'
-        >>> with SharWriter("some_dir", shard_size=100, fields={"recording": "mp3", "features": "lilcom"}) as w:
+        >>> with SharWriter("some_dir", shard_size=100, fields={"recording": "opus", "features": "lilcom"}) as w:
         ...     for cut in cuts:
         ...         w.write(cut)
+
+    .. note:: Different audio backends in Lhotse may use different encoders for the same audio formats.
+        It is advisable to use the same audio backend for saving and loading audio data in Shar and other formats.
+        See: :class:`lhotse.audio.recording.Recording`.
 
     It would create a directory ``some_dir`` with files such as ``some_dir/cuts.000000.jsonl.gz``,
     ``some_dir/recording.000000.tar``, ``some_dir/features.000000.tar``,
@@ -204,6 +206,7 @@ def resolve_writer(name: str) -> Tuple[FieldWriter, str]:
         "wav": (partial(AudioTarWriter, format="wav"), ".tar"),
         "flac": (partial(AudioTarWriter, format="flac"), ".tar"),
         "mp3": (partial(AudioTarWriter, format="mp3"), ".tar"),
+        "opus": (partial(AudioTarWriter, format="opus"), ".tar"),
         "lilcom": (partial(ArrayTarWriter, compression="lilcom"), ".tar"),
         "numpy": (partial(ArrayTarWriter, compression="numpy"), ".tar"),
         "jsonl": (JsonlShardWriter, ".jsonl.gz"),
