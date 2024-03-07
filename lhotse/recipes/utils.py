@@ -71,7 +71,7 @@ def manifests_exist(
     output_dir: Optional[Pathlike],
     types: Iterable[str] = DEFAULT_DETECTED_MANIFEST_TYPES,
     prefix: str = "",
-    suffix: str = "json",
+    suffix: str = "jsonl.gz",
 ) -> bool:
     if output_dir is None:
         return False
@@ -146,7 +146,8 @@ def normalize_text_ami(text: str, normalize: str = "upper") -> str:
         text = re.sub(r"MM HMM", "MM-HMM", text)
         text = re.sub(r"UH HUH", "UH-HUH", text)
         text = re.sub(r"(\b)O K(\b)", r"\g<1>OK\g<2>", text)
-        return text
+        text = re.sub(r"(\b)O_K(\b)", r"\g<1>OK\g<2>", text)
+        return text.strip()
 
 
 def normalize_text_chime6(text: str, normalize: str = "upper") -> str:
@@ -177,6 +178,30 @@ def normalize_text_chime6(text: str, normalize: str = "upper") -> str:
         # replace mm- with mm
         text = re.sub(r"mm-", "mm", text)
         return text
+
+
+def normalize_text_tedlium(text: str, normalize: str = "upper") -> str:
+    """
+    Text normalization similar to Kaldi's TEDLIUM-3 recipe.
+    """
+    if normalize == "none":
+        return text
+    elif normalize == "upper":
+        return text.upper()
+    elif normalize == "kaldi":
+        # Kaldi style text normalization
+        import re
+
+        # remove tokens such as "[NOISE]"
+        text = re.sub(r"\[[^\]]+\]", "", text)
+        # remove "<unk>"
+        text = re.sub(r"<unk>", "", text)
+        # join suffixes with words, e.g. they 're -> they're
+        text = re.sub(r"(\w+) '(\w+)", r"\1'\2", text)
+        # join dangling "'" with next word, e.g. ' 60s -> '60s, ' cause -> 'cause
+        text = re.sub(r"' (\w+)", r"'\1", text)
+
+        return text.strip()
 
 
 class TimeFormatConverter:
