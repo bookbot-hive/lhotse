@@ -5,6 +5,7 @@
 
 import logging
 import re
+import os
 from collections import defaultdict
 from pathlib import Path
 from typing import Dict, Optional, Union
@@ -55,7 +56,7 @@ def download_bookbot_huggingface(
     target_dir = Path(target_dir)
     target_dir.mkdir(parents=True, exist_ok=True)
 
-    dataset = load_dataset(dataset_name)
+    dataset = load_dataset(dataset_name, num_proc=os.cpu_count())
     corpus_name = dataset_name.split("/")[-1]
     splits = dataset.keys()
 
@@ -63,11 +64,7 @@ def download_bookbot_huggingface(
 
     for split in splits:
         if max_train_samples:
-            dataset[split] = (
-                dataset[split]
-                .shuffle(seed=41)
-                .select(range(min(len(dataset[split]), max_train_samples)))
-            )
+            dataset[split] = dataset[split].shuffle(seed=41).select(range(min(len(dataset[split]), max_train_samples)))
 
         split_dir = corpus_dir / split
         split_dir.mkdir(parents=True, exist_ok=True)
@@ -146,19 +143,13 @@ def prepare_bookbot_huggingface(
                 recordings.append(recording)
                 supervisions.append(segment)
 
-            recording_set = RecordingSet.from_recordings(recordings).resample(
-                sampling_rate
-            )
+            recording_set = RecordingSet.from_recordings(recordings).resample(sampling_rate)
             supervision_set = SupervisionSet.from_segments(supervisions)
             validate_recordings_and_supervisions(recording_set, supervision_set)
 
             if output_dir is not None:
-                supervision_set.to_file(
-                    output_dir / f"{corpus_dir.stem}_supervisions_{split.stem}.jsonl.gz"
-                )
-                recording_set.to_file(
-                    output_dir / f"{corpus_dir.stem}_recordings_{split.stem}.jsonl.gz"
-                )
+                supervision_set.to_file(output_dir / f"{corpus_dir.stem}_supervisions_{split.stem}.jsonl.gz")
+                recording_set.to_file(output_dir / f"{corpus_dir.stem}_recordings_{split.stem}.jsonl.gz")
 
             manifests[split.stem] = {
                 "recordings": recording_set,
