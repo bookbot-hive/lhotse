@@ -45,12 +45,12 @@ def download_bookbot_huggingface(
         lang_dir.mkdir(parents=True, exist_ok=True)
 
         sf.write(
-            str(lang_dir / audio_path.with_suffix(".wav")),
+            str((lang_dir / audio_path.stem).with_suffix(".wav")),
             audio_array,
             samplerate=sr,
             format="wav",
         )
-        with open(str(lang_dir / audio_path.with_suffix(".txt")), "w") as f:
+        with open(str((lang_dir / audio_path.stem).with_suffix(".txt")), "w") as f:
             f.write(text)
 
     target_dir = Path(target_dir)
