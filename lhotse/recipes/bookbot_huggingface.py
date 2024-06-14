@@ -4,16 +4,16 @@
 # Apache 2.0
 
 import logging
-import re
 import os
+import re
 from collections import defaultdict
 from pathlib import Path
 from typing import Dict, Optional, Union
 
 import soundfile as sf
 from datasets import load_dataset
-from tqdm.auto import tqdm
 from p_tqdm import p_map
+from tqdm.auto import tqdm
 
 from lhotse import validate_recordings_and_supervisions
 from lhotse.audio import Recording, RecordingSet
@@ -45,12 +45,12 @@ def download_bookbot_huggingface(
         lang_dir.mkdir(parents=True, exist_ok=True)
 
         sf.write(
-            str((lang_dir / audio_path.stem).with_suffix(".wav")),
+            str(lang_dir / audio_path.with_suffix(".wav").name),
             audio_array,
             samplerate=sr,
             format="wav",
         )
-        with open(str((lang_dir / audio_path.stem).with_suffix(".txt")), "w") as f:
+        with open(str(lang_dir / audio_path.with_suffix(".txt").name), "w") as f:
             f.write(text)
 
     target_dir = Path(target_dir)
@@ -64,7 +64,11 @@ def download_bookbot_huggingface(
 
     for split in splits:
         if max_train_samples:
-            dataset[split] = dataset[split].shuffle(seed=41).select(range(min(len(dataset[split]), max_train_samples)))
+            dataset[split] = (
+                dataset[split]
+                .shuffle(seed=41)
+                .select(range(min(len(dataset[split]), max_train_samples)))
+            )
 
         split_dir = corpus_dir / split
         split_dir.mkdir(parents=True, exist_ok=True)
@@ -143,13 +147,19 @@ def prepare_bookbot_huggingface(
                 recordings.append(recording)
                 supervisions.append(segment)
 
-            recording_set = RecordingSet.from_recordings(recordings).resample(sampling_rate)
+            recording_set = RecordingSet.from_recordings(recordings).resample(
+                sampling_rate
+            )
             supervision_set = SupervisionSet.from_segments(supervisions)
             validate_recordings_and_supervisions(recording_set, supervision_set)
 
             if output_dir is not None:
-                supervision_set.to_file(output_dir / f"{corpus_dir.stem}_supervisions_{split.stem}.jsonl.gz")
-                recording_set.to_file(output_dir / f"{corpus_dir.stem}_recordings_{split.stem}.jsonl.gz")
+                supervision_set.to_file(
+                    output_dir / f"{corpus_dir.stem}_supervisions_{split.stem}.jsonl.gz"
+                )
+                recording_set.to_file(
+                    output_dir / f"{corpus_dir.stem}_recordings_{split.stem}.jsonl.gz"
+                )
 
             manifests[split.stem] = {
                 "recordings": recording_set,
