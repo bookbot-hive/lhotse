@@ -22,7 +22,6 @@ from lhotse.utils import (
     compute_start_duration_for_extended_cut,
     fastcopy,
     ifnone,
-    is_torchaudio_available,
     overlaps,
     to_hashable,
 )
@@ -178,6 +177,9 @@ class Cut:
     drop_features: Callable
     drop_recording: Callable
     drop_supervisions: Callable
+    drop_alignments: Callable
+    drop_in_memory_data: Callable
+    iter_data: Callable
     truncate: Callable
     pad: Callable
     extend_by: Callable
@@ -185,6 +187,7 @@ class Cut:
     perturb_speed: Callable
     perturb_tempo: Callable
     perturb_volume: Callable
+    phone: Callable
     reverb_rir: Callable
     map_supervisions: Callable
     merge_supervisions: Callable
@@ -677,7 +680,7 @@ class Cut:
         from .set import CutSet
 
         if not self.supervisions:
-            return self
+            return CutSet([self])
         supervisions = sorted(self.supervisions, key=lambda s: s.start)
         supervision_group = [supervisions[0]]
         cur_end = supervisions[0].end

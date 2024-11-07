@@ -50,6 +50,7 @@ from lhotse.lazy import (
     LazyManifestIterator,
     LazyMapper,
     LazySlicer,
+    T,
 )
 from lhotse.serialization import Serializable
 from lhotse.supervision import SupervisionSegment, SupervisionSet
@@ -61,7 +62,6 @@ from lhotse.utils import (
     Seconds,
     compute_num_frames,
     compute_num_samples,
-    deprecated,
     exactly_one_not_null,
     fastcopy,
     ifnone,
@@ -71,6 +71,10 @@ from lhotse.utils import (
 )
 
 FW = TypeVar("FW", bound=FeaturesWriter)
+
+
+def is_cut(example) -> bool:
+    return isinstance(example, Cut)
 
 
 class CutSet(Serializable, AlgorithmMixin):
@@ -910,9 +914,9 @@ class CutSet(Serializable, AlgorithmMixin):
 
         if last is not None:
             assert last > 0
-            if last > len(self):
-                return self
             N = len(self)
+            if last > N:
+                return self
             return CutSet.from_cuts(islice(self, N - last, N))
 
         if supervision_ids is not None:
@@ -936,6 +940,16 @@ class CutSet(Serializable, AlgorithmMixin):
                 )
             # Restore the requested cut_ids order.
             return cuts.sort_like(cut_ids)
+
+    def map(
+        self,
+        transform_fn: Callable[[T], T],
+        apply_fn: Optional[Callable[[T], bool]] = is_cut,
+    ) -> "CutSet":
+        ans = CutSet(LazyMapper(self.data, fn=transform_fn, apply_fn=apply_fn))
+        if self.is_lazy:
+            return ans
+        return ans.to_eager()
 
     def filter_supervisions(
         self, predicate: Callable[[SupervisionSegment], bool]
@@ -1378,34 +1392,21 @@ class CutSet(Serializable, AlgorithmMixin):
         :param rng: optional random number generator to be used with a 'random' ``offset_type``.
         :return: a new CutSet instance with truncated cuts.
         """
-        truncated_cuts = []
-        for cut in self:
-            if cut.duration <= max_duration:
-                truncated_cuts.append(cut)
-                continue
-
-            def compute_offset():
-                if offset_type == "start":
-                    return 0.0
-                last_offset = cut.duration - max_duration
-                if offset_type == "end":
-                    return last_offset
-                if offset_type == "random":
-                    if rng is None:
-                        return random.uniform(0.0, last_offset)
-                    else:
-                        return rng.uniform(0.0, last_offset)
-                raise ValueError(f"Unknown 'offset_type' option: {offset_type}")
-
-            truncated_cuts.append(
-                cut.truncate(
-                    offset=compute_offset(),
-                    duration=max_duration,
-                    keep_excessive_supervisions=keep_excessive_supervisions,
-                    preserve_id=preserve_id,
-                )
+        assert offset_type in (
+            "start",
+            "end",
+            "random",
+        ), f"Unknown offset type: '{offset_type}'"
+        return self.map(
+            partial(
+                _truncate_single,
+                max_duration=max_duration,
+                offset_type=offset_type,
+                keep_excessive_supervisions=keep_excessive_supervisions,
+                preserve_id=preserve_id,
+                rng=rng,
             )
-        return CutSet(truncated_cuts)
+        )
 
     def extend_by(
         self,
@@ -1589,6 +1590,27 @@ class CutSet(Serializable, AlgorithmMixin):
         """
         return self.map(partial(_perturb_volume, factor=factor, affix_id=affix_id))
 
+    def narrowband(
+        self, codec: str, restore_orig_sr: bool = True, affix_id: bool = True
+    ) -> "CutSet":
+        """
+        Return a new :class:`~lhotse.cut.CutSet` that contains narrowband effect cuts.
+        It requires the recording manifests to be present.
+        If the feature manifests are attached, they are dropped.
+        The supervision manifests are remaining the same.
+
+        :param codec: Codec name.
+        :param restore_orig_sr: Restore original sampling rate.
+        :param affix_id: Should we modify the ID (useful if both versions of the same
+            cut are going to be present in a single manifest).
+        :return: a modified copy of the ``CutSet``.
+        """
+        return self.map(
+            lambda cut: cut.narrowband(
+                codec=codec, restore_orig_sr=restore_orig_sr, affix_id=affix_id
+            )
+        )
+
     def normalize_loudness(
         self, target: float, mix_first: bool = True, affix_id: bool = True
     ) -> "CutSet":
@@ -1667,7 +1689,7 @@ class CutSet(Serializable, AlgorithmMixin):
         snr: Optional[Union[Decibels, Sequence[Decibels]]] = 20,
         preserve_id: Optional[str] = None,
         mix_prob: float = 1.0,
-        seed: Union[int, Literal["trng", "randomized"]] = 42,
+        seed: Union[int, Literal["trng", "randomized"], random.Random] = 42,
         random_mix_offset: bool = False,
     ) -> "CutSet":
         """
@@ -1696,7 +1718,7 @@ class CutSet(Serializable, AlgorithmMixin):
             Values lower than 1.0 mean that some cuts in the output will be unchanged.
         :param seed: an optional int or "trng". Random seed for choosing the cuts to mix and the SNR.
             If "trng" is provided, we'll use the ``secrets`` module for non-deterministic results
-            on each iteration.
+            on each iteration. You can also directly pass a ``random.Random`` instance here.
         :param random_mix_offset: an optional bool.
             When ``True`` and the duration of the to be mixed in cut in longer than the original cut,
              select a random sub-region from the to be mixed in cut.
@@ -1739,6 +1761,14 @@ class CutSet(Serializable, AlgorithmMixin):
         Return a new :class:`.CutSet`, where each :class:`.Cut` is copied and detached from the alignments present in its supervisions.
         """
         return self.map(_drop_alignments)
+
+    def drop_in_memory_data(self) -> "CutSet":
+        """
+        Return a new :class:`.CutSet`, where each :class:`.Cut` is copied and detached from any in-memory data it held.
+        The manifests for in-memory data are converted into placeholders that can still be looked up for
+        metadata, but will fail on attempts to load the data.
+        """
+        return self.map(_drop_in_memory_data)
 
     def compute_and_store_features(
         self,
@@ -2001,7 +2031,6 @@ class CutSet(Serializable, AlgorithmMixin):
         """
         from concurrent.futures import ThreadPoolExecutor
 
-        import torch
         from torch.utils.data import DataLoader
 
         from lhotse.dataset import SimpleCutSampler, UnsupervisedWaveformDataset
@@ -2491,6 +2520,118 @@ class CutSet(Serializable, AlgorithmMixin):
             partial(_transform_text, transform_fn=transform_fn)
         )
 
+    def prefetch(self, buffer_size: int = 10) -> "CutSet":
+        """
+        Pre-fetches the CutSet elements in a background process.
+        Useful for enabling concurrent reading/processing/writing in ETL-style tasks.
+
+        .. caution:: This method internally uses a PyTorch DataLoader with a single worker.
+            It is not suitable for use in typical PyTorch training scripts.
+
+        .. caution:: If you run into pickling issues when using this method, you're also likely
+            using .filter/.map methods with a lambda function.
+            Please set ``lhotse.set_dill_enabled(True)`` to resolve these issues, or convert lambdas
+            to regular functions + ``functools.partial``
+
+        """
+        from torch.utils.data import DataLoader
+
+        from lhotse.dataset import DynamicCutSampler, IterableDatasetWrapper
+
+        return CutSet(
+            DataLoader(
+                dataset=IterableDatasetWrapper(
+                    _BackgroundCutFetcher(),
+                    DynamicCutSampler(self, max_cuts=1, rank=0, world_size=1),
+                ),
+                batch_size=None,
+                num_workers=1,
+                prefetch_factor=buffer_size,
+            )
+        )
+
+    def to_huggingface_dataset(self):
+        """
+        Converts a CutSet to a HuggingFace Dataset. Currently, only MonoCut with one recording source is supported.
+        Other cut types will be supported in the future.
+
+        Currently, two formats are supported:
+            1. If each cut has one supervision (e.g. LibriSpeech), each cut is represented as a single row (entry)
+               in the HuggingFace dataset with all the supervision information stored along the cut information.
+               The final HuggingFace dataset format is:
+                   ╔═══════════════════╦═══════════════════════════════╗
+                   ║      Feature      ║            Type               ║
+                   ╠═══════════════════╬═══════════════════════════════╣
+                   ║        id         ║ Value(dtype='string')         ║
+                   ╠═══════════════════╬═══════════════════════════════╣
+                   ║      audio        ║ Audio()                       ║
+                   ╠═══════════════════╬═══════════════════════════════╣
+                   ║     duration      ║ Value(dtype='float32')        ║
+                   ╠═══════════════════╬═══════════════════════════════╣
+                   ║   num_channels    ║ Value(dtype='uint16')         ║
+                   ╠═══════════════════╬═══════════════════════════════╣
+                   ║       text        ║ Value(dtype='string')         ║
+                   ╠═══════════════════╬═══════════════════════════════╣
+                   ║     speaker       ║ Value(dtype='string')         ║
+                   ╠═══════════════════╬═══════════════════════════════╣
+                   ║     language      ║ Value(dtype='string')         ║
+                   ╠═══════════════════╬═══════════════════════════════╣
+                   ║   {x}_alignment   ║ Sequence(Alignment)           ║
+                   ╚═══════════════════╩═══════════════════════════════╝
+               where x stands for the alignment type (commonly used: "word", "phoneme").
+
+               Alignment is represented as:
+                   ╔═══════════════════╦═══════════════════════════════╗
+                   ║      Feature      ║            Type               ║
+                   ╠═══════════════════╬═══════════════════════════════╣
+                   ║      symbol       ║ Value(dtype='string')         ║
+                   ╠═══════════════════╬═══════════════════════════════╣
+                   ║       start       ║ Value(dtype='float32')        ║
+                   ╠═══════════════════╬═══════════════════════════════╣
+                   ║        end        ║ Value(dtype='float32')        ║
+                   ╚═══════════════════╩═══════════════════════════════╝
+
+
+            2. If each cut has multiple supervisions (e.g. AMI), each cut is represented as a single row (entry)
+               while all the supervisions are stored in a separate list of dictionaries under the 'segments' key.
+               The final HuggingFace dataset format is:
+                   ╔══════════════╦════════════════════════════════════╗
+                   ║   Feature    ║                 Type               ║
+                   ╠══════════════╬════════════════════════════════════╣
+                   ║      id      ║ Value(dtype='string')              ║
+                   ╠══════════════╬════════════════════════════════════╣
+                   ║    audio     ║ Audio()                            ║
+                   ╠══════════════╬════════════════════════════════════╣
+                   ║   duration   ║ Value(dtype='float32')             ║
+                   ╠══════════════╬════════════════════════════════════╣
+                   ║ num_channels ║ Value(dtype='uint16')              ║
+                   ╠══════════════╬════════════════════════════════════╣
+                   ║   segments   ║ Sequence(Segment)                  ║
+                   ╚══════════════╩════════════════════════════════════╝
+               where one Segment is represented as:
+                   ╔═══════════════════╦═══════════════════════════════╗
+                   ║      Feature      ║            Type               ║
+                   ╠═══════════════════╬═══════════════════════════════╣
+                   ║        text       ║ Value(dtype='string')         ║
+                   ╠═══════════════════╬═══════════════════════════════╣
+                   ║       start       ║ Value(dtype='float32')        ║
+                   ╠═══════════════════╬═══════════════════════════════╣
+                   ║        end        ║ Value(dtype='float32')        ║
+                   ╠═══════════════════╬═══════════════════════════════╣
+                   ║      channel      ║ Value(dtype='string')         ║
+                   ╠═══════════════════╬═══════════════════════════════╣
+                   ║      speaker      ║ Value(dtype='string')         ║
+                   ╠═══════════════════╬═══════════════════════════════╣
+                   ║      language     ║ Value(dtype='string')         ║
+                   ╠═══════════════════╬═══════════════════════════════╣
+                   ║   {x}_alignment   ║ Sequence(Alignment)           ║
+                   ╚═══════════════════╩═══════════════════════════════╝
+        :return: A HuggingFace Dataset.
+        """
+        from lhotse.hf import export_cuts_to_hf
+
+        return export_cuts_to_hf(self)
+
     def __repr__(self) -> str:
         try:
             len_val = len(self)
@@ -2520,6 +2661,12 @@ class CutSet(Serializable, AlgorithmMixin):
 
     def __iter__(self) -> Iterable[Cut]:
         yield from self.cuts
+
+
+class _BackgroundCutFetcher(torch.utils.data.Dataset):
+    def __getitem__(self, cuts: CutSet):
+        assert len(cuts) == 1
+        return cuts[0]
 
 
 def mix(
@@ -3352,6 +3499,42 @@ def _drop_supervisions(cut, *args, **kwargs):
     return cut.drop_supervisions(*args, **kwargs)
 
 
+def _drop_in_memory_data(cut, *args, **kwargs):
+    return cut.drop_in_memory_data(*args, **kwargs)
+
+
+def _truncate_single(
+    cut: Cut,
+    max_duration: Seconds,
+    offset_type: str,
+    keep_excessive_supervisions: bool = True,
+    preserve_id: bool = False,
+    rng: Optional[random.Random] = None,
+) -> Cut:
+    if cut.duration <= max_duration:
+        return cut
+
+    def compute_offset():
+        if offset_type == "start":
+            return 0.0
+        last_offset = cut.duration - max_duration
+        if offset_type == "end":
+            return last_offset
+        if offset_type == "random":
+            if rng is None:
+                return random.uniform(0.0, last_offset)
+            else:
+                return rng.uniform(0.0, last_offset)
+        raise ValueError(f"Unknown 'offset_type' option: {offset_type}")
+
+    return cut.truncate(
+        offset=compute_offset(),
+        duration=max_duration,
+        keep_excessive_supervisions=keep_excessive_supervisions,
+        preserve_id=preserve_id,
+    )
+
+
 def _export_to_shar_single(
     cuts: CutSet,
     output_dir: Pathlike,
@@ -3425,10 +3608,13 @@ class LazyCutMixer(Dillable):
         Values lower than 1.0 mean that some cuts in the output will be unchanged.
     :param seed: an optional int or "trng". Random seed for choosing the cuts to mix and the SNR.
         If "trng" is provided, we'll use the ``secrets`` module for non-deterministic results
-        on each iteration.
+        on each iteration. You can also directly pass a ``random.Random`` instance here.
     :param random_mix_offset: an optional bool.
         When ``True`` and the duration of the to be mixed in cut in longer than the original cut,
          select a random sub-region from the to be mixed in cut.
+    :param stateful: when True, each time this object is iterated we will shuffle the noise cuts
+        using a different random seed. This is useful when you often re-start the iteration and
+        don't want to keep seeing the same noise examples. Enabled by default.
     """
 
     def __init__(
@@ -3440,8 +3626,9 @@ class LazyCutMixer(Dillable):
         snr: Optional[Union[Decibels, Sequence[Decibels]]] = 20,
         preserve_id: Optional[str] = None,
         mix_prob: float = 1.0,
-        seed: Union[int, Literal["trng", "randomized"]] = 42,
+        seed: Union[int, Literal["trng", "randomized"], random.Random] = 42,
         random_mix_offset: bool = False,
+        stateful: bool = True,
     ) -> None:
         self.source = cuts
         self.mix_in_cuts = mix_in_cuts
@@ -3452,6 +3639,8 @@ class LazyCutMixer(Dillable):
         self.mix_prob = mix_prob
         self.seed = seed
         self.random_mix_offset = random_mix_offset
+        self.stateful = stateful
+        self.num_times_iterated = 0
 
         assert 0.0 <= self.mix_prob <= 1.0
         assert self.duration is None or self.duration > 0
@@ -3465,28 +3654,52 @@ class LazyCutMixer(Dillable):
     def __iter__(self):
         from lhotse.dataset.dataloading import resolve_seed
 
-        rng = random.Random(resolve_seed(self.seed))
-        mix_in_cuts = iter(self.mix_in_cuts.repeat().shuffle(rng=rng, buffer_size=100))
+        if isinstance(self.seed, random.Random):
+            rng = self.seed
+        else:
+            rng = random.Random(resolve_seed(self.seed) + self.num_times_iterated)
+        if self.stateful:
+            self.num_times_iterated += 1
 
+        if self.mix_in_cuts.is_lazy:
+            # If the noise input is lazy, we'll shuffle it approximately.
+            # We set the shuffling buffer size to 2000 because that's the size of MUSAN,
+            # so even if the user forgets to convert MUSAN to an eager manifest, they will
+            # get roughly the same quality of noise randomness.
+            # Note: we can't just call .to_eager() as the noise CutSet can technically be
+            #       very large, or even hold data in-memory in case of webdataset/Lhotse Shar sources.
+            def noise_gen():
+                yield from self.mix_in_cuts.repeat().shuffle(rng=rng, buffer_size=2000)
+
+        else:
+            # Eager nose cuts are just fully reshuffled in a different order on each noise "epoch".
+            def noise_gen():
+                #
+                while True:
+                    yield from self.mix_in_cuts.shuffle(rng=rng)
+
+        mix_in_cuts = iter(noise_gen())
         for cut in self.source:
             # Check whether we're going to mix something into the current cut
             # or pass it through unchanged.
-            if rng.uniform(0.0, 1.0) > self.mix_prob:
+            if not is_cut(cut) or rng.uniform(0.0, 1.0) > self.mix_prob:
                 yield cut
                 continue
-            to_mix = next(mix_in_cuts)
             # Determine the SNR - either it's specified or we need to sample one.
             cut_snr = (
                 rng.uniform(*self.snr)
                 if isinstance(self.snr, (list, tuple))
                 else self.snr
             )
-            if self.random_mix_offset and to_mix.duration > cut.duration:
-                to_mix = to_mix.truncate(
-                    offset=rng.uniform(0, to_mix.duration - cut.duration),
-                    duration=cut.duration,
-                )
+            # Note: we subtract 0.05s (50ms) from the target duration to avoid edge cases
+            #       where we mix in some noise cut that effectively has 0 frames of features.
+            target_mixed_duration = round(
+                self.duration if self.duration is not None else cut.duration - 0.05,
+                ndigits=8,
+            )
             # Actual mixing
+            to_mix = next(mix_in_cuts)
+            to_mix = self._maybe_truncate_cut(to_mix, target_mixed_duration, rng)
             mixed = cut.mix(other=to_mix, snr=cut_snr, preserve_id=self.preserve_id)
             # Did the user specify a duration?
             # If yes, we will ensure that shorter cuts have more noise mixed in
@@ -3497,10 +3710,11 @@ class LazyCutMixer(Dillable):
             # Keep sampling until we mixed in a "duration" amount of noise.
             # Note: we subtract 0.05s (50ms) from the target duration to avoid edge cases
             #       where we mix in some noise cut that effectively has 0 frames of features.
-            while mixed_in_duration < (
-                self.duration if self.duration is not None else cut.duration - 0.05
-            ):
+            while mixed_in_duration < target_mixed_duration - 0.05:
                 to_mix = next(mix_in_cuts)
+                to_mix = self._maybe_truncate_cut(
+                    to_mix, target_mixed_duration - mixed_in_duration, rng
+                )
                 # Keep the SNR constant for each cut from "self".
                 mixed = mixed.mix(
                     other=to_mix,
@@ -3515,11 +3729,23 @@ class LazyCutMixer(Dillable):
                     mixed_in_duration + to_mix.duration, ndigits=8
                 )
             # We truncate the mixed to either the original duration or the requested duration.
+            # Note: we don't use 'target_mixed_duration' here because it may have subtracted
+            #       a tiny bit of actual target duration to avoid errors related to edge effects.
             mixed = mixed.truncate(
                 duration=self.duration if self.duration is not None else cut.duration,
                 preserve_id=self.preserve_id is not None,
             )
             yield mixed
+
+    def _maybe_truncate_cut(
+        self, cut: Cut, target_duration: Seconds, rng: random.Random
+    ) -> Cut:
+        if self.random_mix_offset and cut.duration > target_duration:
+            cut = cut.truncate(
+                offset=rng.uniform(0, cut.duration - target_duration),
+                duration=target_duration,
+            )
+        return cut
 
     def __len__(self) -> int:
         return len(self.source)

@@ -2,13 +2,13 @@ from dataclasses import dataclass
 from io import BytesIO
 from math import ceil, isclose
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Tuple, Union
+from typing import Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
 import torch
 from _decimal import ROUND_HALF_UP
 
-from lhotse.audio.backend import info, save_audio, torchaudio_info
+from lhotse.audio.backend import get_current_audio_backend, info, save_audio
 from lhotse.audio.source import AudioSource
 from lhotse.audio.utils import (
     AudioLoadingError,
@@ -20,6 +20,7 @@ from lhotse.augmentation import (
     AudioTransform,
     DereverbWPE,
     LoudnessNormalization,
+    Narrowband,
     Resample,
     ReverbWithImpulseResponse,
     Speed,
@@ -126,7 +127,7 @@ class Recording:
     num_samples: int
     duration: Seconds
     channel_ids: Optional[List[int]] = None
-    transforms: Optional[List[Dict]] = None
+    transforms: Optional[List[Union[AudioTransform, Dict]]] = None
 
     def __post_init__(self):
         if self.channel_ids is None:
@@ -154,6 +155,14 @@ class Recording:
             if s.has_video:
                 return s
         return None
+
+    @property
+    def is_in_memory(self) -> bool:
+        return any(s.type == "memory" for s in self.sources)
+
+    @property
+    def is_placeholder(self) -> bool:
+        return any(s.type == "shar" for s in self.sources)
 
     @property
     def num_channels(self) -> int:
@@ -251,7 +260,7 @@ class Recording:
         :return: a new ``Recording`` instance that owns the byte string data.
         """
         stream = BytesIO(data)
-        audio_info = torchaudio_info(stream)
+        audio_info = get_current_audio_backend().info(stream)
         return Recording(
             id=recording_id,
             sampling_rate=audio_info.samplerate,
@@ -334,7 +343,12 @@ class Recording:
         )
 
     def to_dict(self) -> dict:
-        return asdict_nonull(self)
+        d = asdict_nonull(self)
+        if self.transforms is not None:
+            d["transforms"] = [
+                t if isinstance(t, dict) else t.to_dict() for t in self.transforms
+            ]
+        return d
 
     def to_cut(self):
         """
@@ -395,7 +409,8 @@ class Recording:
             )
 
         transforms = [
-            AudioTransform.from_dict(params) for params in self.transforms or []
+            tnfm if isinstance(tnfm, AudioTransform) else AudioTransform.from_dict(tnfm)
+            for tnfm in self.transforms or []
         ]
 
         # Do a "backward pass" over data augmentation transforms to get the
@@ -488,10 +503,15 @@ class Recording:
         )
 
         for t in ifnone(self.transforms, ()):
-            assert t["name"] not in (
-                "Speed",
-                "Tempo",
-            ), "Recording.load_video() does not support speed/tempo perturbation."
+            if isinstance(t, dict):
+                assert t["name"] not in (
+                    "Speed",
+                    "Tempo",
+                ), "Recording.load_video() does not support speed/tempo perturbation."
+            else:
+                assert not isinstance(
+                    t, (Speed, Tempo)
+                ), "Recording.load_video() does not support speed/tempo perturbation."
 
         if not with_audio:
             video, _ = self._video_source.load_video(
@@ -519,7 +539,8 @@ class Recording:
             )
 
         transforms = [
-            AudioTransform.from_dict(params) for params in self.transforms or []
+            tnfm if isinstance(tnfm, AudioTransform) else AudioTransform.from_dict(tnfm)
+            for tnfm in self.transforms or []
         ]
 
         # Do a "backward pass" over data augmentation transforms to get the
@@ -659,7 +680,7 @@ class Recording:
         :return: a modified copy of the current ``Recording``.
         """
         transforms = self.transforms.copy() if self.transforms is not None else []
-        transforms.append(Speed(factor=factor).to_dict())
+        transforms.append(Speed(factor=factor))
         new_num_samples = perturb_num_samples(self.num_samples, factor)
         new_duration = new_num_samples / self.sampling_rate
         return fastcopy(
@@ -684,7 +705,7 @@ class Recording:
         :return: a modified copy of the current ``Recording``.
         """
         transforms = self.transforms.copy() if self.transforms is not None else []
-        transforms.append(Tempo(factor=factor).to_dict())
+        transforms.append(Tempo(factor=factor))
         new_num_samples = perturb_num_samples(self.num_samples, factor)
         new_duration = new_num_samples / self.sampling_rate
         return fastcopy(
@@ -705,10 +726,40 @@ class Recording:
         :return: a modified copy of the current ``Recording``.
         """
         transforms = self.transforms.copy() if self.transforms is not None else []
-        transforms.append(Volume(factor=factor).to_dict())
+        transforms.append(Volume(factor=factor))
         return fastcopy(
             self,
             id=f"{self.id}_vp{factor}" if affix_id else self.id,
+            transforms=transforms,
+        )
+
+    def narrowband(
+        self, codec: str, restore_orig_sr: bool = True, affix_id: bool = True
+    ) -> "Recording":
+        """
+        Return a new ``Recording`` that will lazily apply narrowband effect while loading audio.
+            by affixing it with "_nb_{codec}".
+
+        :return: a modified copy of the current ``Recording``.
+        """
+        transforms = self.transforms.copy() if self.transforms is not None else []
+        transforms.append(
+            Narrowband(
+                codec=codec,
+                source_sampling_rate=self.sampling_rate,
+                restore_orig_sr=restore_orig_sr,
+            ).to_dict()
+        )
+        new_num_samples = compute_num_samples(
+            self.duration,
+            self.sampling_rate if restore_orig_sr else 8000,
+            rounding=ROUND_HALF_UP,
+        )
+        return fastcopy(
+            self,
+            id=f"{self.id}_nb_{codec}" if affix_id else self.id,
+            num_samples=new_num_samples,
+            sampling_rate=self.sampling_rate if restore_orig_sr else 8000,
             transforms=transforms,
         )
 
@@ -722,7 +773,7 @@ class Recording:
         :return: a modified copy of the current ``Recording``.
         """
         transforms = self.transforms.copy() if self.transforms is not None else []
-        transforms.append(LoudnessNormalization(target=target).to_dict())
+        transforms.append(LoudnessNormalization(target=target))
         return fastcopy(
             self,
             id=f"{self.id}_ln{target}" if affix_id else self.id,
@@ -738,7 +789,7 @@ class Recording:
         :return: a modified copy of the current ``Recording``.
         """
         transforms = self.transforms.copy() if self.transforms is not None else []
-        transforms.append(DereverbWPE().to_dict())
+        transforms.append(DereverbWPE())
         return fastcopy(
             self,
             id=f"{self.id}_wpe" if affix_id else self.id,
@@ -751,7 +802,7 @@ class Recording:
         normalize_output: bool = True,
         early_only: bool = False,
         affix_id: bool = True,
-        rir_channels: Optional[List[int]] = None,
+        rir_channels: Optional[Sequence[int]] = None,
         room_rng_seed: Optional[int] = None,
         source_rng_seed: Optional[int] = None,
     ) -> "Recording":
@@ -812,7 +863,7 @@ class Recording:
                 early_only=early_only,
                 rir_channels=rir_channels if rir_channels is not None else [0],
                 rir_generator=rir_generator,
-            ).to_dict()
+            )
         )
         return fastcopy(
             self,
@@ -835,7 +886,7 @@ class Recording:
             Resample(
                 source_sampling_rate=self.sampling_rate,
                 target_sampling_rate=sampling_rate,
-            ).to_dict()
+            )
         )
 
         new_num_samples = compute_num_samples(
@@ -856,8 +907,15 @@ class Recording:
     @staticmethod
     def from_dict(data: dict) -> "Recording":
         raw_sources = data.pop("sources")
+        try:
+            transforms = data.pop("transforms")
+            transforms = [AudioTransform.from_dict(t) for t in transforms]
+        except KeyError:
+            transforms = None
         return Recording(
-            sources=[AudioSource.from_dict(s) for s in raw_sources], **data
+            sources=[AudioSource.from_dict(s) for s in raw_sources],
+            transforms=transforms,
+            **data,
         )
 
 

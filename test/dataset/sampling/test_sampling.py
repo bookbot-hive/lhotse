@@ -25,6 +25,7 @@ from lhotse.dataset.sampling import (
     BucketingSampler,
     CutPairsSampler,
     SimpleCutSampler,
+    WeightedSimpleCutSampler,
     ZipSampler,
 )
 from lhotse.dataset.sampling.base import SamplingDiagnostics, TimeConstraint
@@ -1024,6 +1025,54 @@ def test_cut_pairs_sampler_lazy_shuffle(sampler_cls):
         assert [c.id for c in sampled_src_cuts] != [c.id for c in lazy_cuts]
 
 
+def test_weighted_sampler_num_samples():
+    cut_set = DummyManifest(CutSet, begin_id=0, end_id=100)
+    weight = [random.random() for i in range(100)]
+    num_samples = 32
+
+    sampler = WeightedSimpleCutSampler(
+        cut_set,
+        weight,
+        num_samples=num_samples,
+        max_duration=10.0,
+        drop_last=True,
+    )
+
+    sampled_cuts = []
+    num_cuts = 0
+    for batch in sampler:
+        sampled_cuts.extend(batch)
+        num_cuts += len(batch)
+
+    assert num_cuts <= num_samples
+
+
+def test_weighted_sampler_across_epochs():
+    cut_set = DummyManifest(CutSet, begin_id=0, end_id=100)
+    weight = [random.random() for i in range(100)]
+    num_samples = 32
+
+    sampler = WeightedSimpleCutSampler(
+        cut_set,
+        weight,
+        num_samples=num_samples,
+        max_duration=10.0,
+        drop_last=True,
+    )
+
+    # 1st epoch
+    sampler.set_epoch(1)
+    batch = next(iter(sampler))
+    cut_ids1 = [c.id for c in batch]
+
+    # 2st epoch
+    sampler.set_epoch(2)
+    batch = next(iter(sampler))
+    cut_ids2 = [c.id for c in batch]
+
+    assert set(cut_ids1) != set(cut_ids2)
+
+
 @pytest.mark.parametrize("datasize", [10, 1000, 20000])
 @pytest.mark.parametrize("bufsize", [100, 1000, 10000])
 def test_streaming_shuffle(datasize, bufsize):
@@ -1183,3 +1232,27 @@ def test_sampler_map():
     b = batches[1]
     assert len(b) == 1
     assert b[0].duration == 5.0
+
+
+def test_sampler_much_less_data_than_ddp_ranks():
+    world_size = 128
+    orig_cut = dummy_cut(0)
+    cuts = CutSet([orig_cut])
+
+    samplers = [
+        DynamicCutSampler(
+            cuts, max_cuts=256, drop_last=False, world_size=world_size, rank=i
+        )
+        for i in range(world_size)
+    ]
+    # None of the ranks drops anything, all of them return the one cut we have.
+    for sampler in samplers:
+        (batch,) = [b for b in sampler]
+        assert len(batch) == 1
+        (sampled_cut,) = batch
+        assert (
+            sampled_cut.id[: len(orig_cut.id)] == orig_cut.id
+        )  # same stem, possibly added '_dupX' suffix
+        # otherwise the cuts are identical
+        sampled_cut.id = orig_cut.id
+        assert sampled_cut == orig_cut
