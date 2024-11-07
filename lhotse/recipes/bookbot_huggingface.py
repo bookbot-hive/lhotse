@@ -102,7 +102,7 @@ def prepare_bookbot_huggingface(
 
     for split in corpus_dir.iterdir():
         if split.is_dir():
-            wav_files = split.rglob("*.wav")
+            wav_files = list(split.rglob("*.wav"))
             logging.debug(f"{split} dataset manifest generation.")
             recordings = []
             supervisions = []
@@ -129,7 +129,7 @@ def prepare_bookbot_huggingface(
                             text = text.replace(d, "")
 
                     if normalize_words:
-                        text = re.sub('[\,\?\.\!\-\;\:"\“\%\‘\”\�]', "", text).lower()
+                        text = re.sub('[\,\?\.\!\-\;\:"\“\%\‘\”\�]', "", text).upper()
 
                 recording = Recording.from_file(wav_file, recording_id=idx)
 
