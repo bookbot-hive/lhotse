@@ -27,21 +27,37 @@ def download_bookbot_huggingface(
     text_column_name: str = "phonemes_ipa",
     word_delimiter_token: str = " | ",
     max_train_samples: Optional[int] = None,
+    language: Optional[str] = None,
 ) -> Path:
     """
     Download and unzip any Bookbot phoneme dataset from HuggingFace.
     :param dataset_name: str, HuggingFace Hub dataset name.
     :param target_dir: Pathlike, the path of the dir to store the dataset.
+    :param text_column_name: str, name of the column containing phonemes.
+    :param word_delimiter_token: str, token used to join phonemes.
+    :param max_train_samples: Optional[int], limit number of training samples.
+    :param language: Optional[str], fallback language if not present in dataset.
     :return: the path to downloaded and extracted directory with data.
     """
 
     def save_audio_file(datum):
-        audio_path, audio_array, sr = datum["audio"].values()
-        audio_path = Path(audio_path)
+        audio_data = datum["audio"]
+        audio_path = Path(audio_data["path"])
+        audio_array = audio_data["array"]
+        sr = audio_data["sampling_rate"]
         text = word_delimiter_token.join(datum[text_column_name])
-        language = datum["language"]
 
-        lang_dir = split_dir / language
+        # Use language from dataset if available, otherwise use fallback
+        if "language" in datum:
+            lang = datum["language"]
+        elif language is not None:
+            lang = language
+        else:
+            raise ValueError(
+                "No language found in dataset and no fallback language provided"
+            )
+
+        lang_dir = split_dir / lang
         lang_dir.mkdir(parents=True, exist_ok=True)
 
         sf.write(

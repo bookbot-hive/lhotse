@@ -55,12 +55,19 @@ def bookbot_huggingface(
     default=None,
     help="Maximum number of train samples",
 )
+@click.option(
+    "--language",
+    type=str,
+    default=None,
+    help="Fallback language if not present in dataset",
+)
 def bookbot_huggingface(
     dataset_name: str,
     target_dir: Pathlike,
     text_column_name: str,
     word_delimiter_token: str,
     max_train_samples: int,
+    language: str,
 ):
     """Bookbot download."""
     download_bookbot_huggingface(
@@ -69,4 +76,5 @@ def bookbot_huggingface(
         text_column_name,
         word_delimiter_token,
         max_train_samples,
+        language,
     )
